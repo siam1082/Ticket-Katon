@@ -11,11 +11,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 
 	"ticket-katon-backend/internal/config"
 	"ticket-katon-backend/internal/database"
 	httpHandler "ticket-katon-backend/internal/handler/http"
+	"ticket-katon-backend/internal/middleware"
+	"ticket-katon-backend/internal/pkg/token"
+	"ticket-katon-backend/internal/repository/postgres"
 	"ticket-katon-backend/internal/service"
 )
 
@@ -24,34 +27,66 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. Init Database Connections
+	// 1. Databases
 	pgPool, err := database.NewPostgresPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("[FATAL] Postgres connection failed: %v", err)
+		log.Fatalf("[FATAL] Postgres init failed: %v", err)
 	}
 	defer pgPool.Close()
 
 	redisClient, err := database.NewRedisClient(ctx, cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("[FATAL] Redis connection failed: %v", err)
+		log.Fatalf("[FATAL] Redis init failed: %v", err)
 	}
 	defer redisClient.Close()
 
-	// 2. Init Service & Handler
+	// 2. Repositories & Token Maker
+	tokenMaker := token.NewTokenMaker(cfg.JWTSecret)
+	userRepo := postgres.NewPostgresUserRepository(pgPool)
+	tripRepo := postgres.NewPostgresTripRepository(pgPool)
+
+	// 3. Services
 	healthSvc := service.NewHealthService(pgPool, redisClient)
+	authSvc := service.NewAuthService(userRepo, tokenMaker)
+	tripSvc := service.NewTripService(tripRepo)
+
+	// 4. Handlers
 	healthHdl := httpHandler.NewHealthHandler(healthSvc)
+	authHdl := httpHandler.NewAuthHandler(authSvc)
+	tripHdl := httpHandler.NewTripHandler(tripSvc)
 
-	// 3. Router Setup
+	// 5. Router Setup
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(chiMiddleware.RequestID)
+	r.Use(chiMiddleware.RealIP)
+	r.Use(chiMiddleware.Logger)
+	r.Use(chiMiddleware.Recoverer)
+	r.Use(chiMiddleware.Timeout(30 * time.Second))
 
+	// Health Check
 	r.Get("/health", healthHdl.HealthCheck)
 
-	// 4. Server with Graceful Shutdown
+	// API Routes
+	r.Route("/api/v1", func(api chi.Router) {
+		// Auth Routes
+		api.Route("/auth", func(auth chi.Router) {
+			auth.Post("/register", authHdl.Register)
+			auth.Post("/login", authHdl.Login)
+
+			auth.Group(func(protected chi.Router) {
+				protected.Use(middleware.AuthMiddleware(tokenMaker))
+				protected.Get("/profile", authHdl.Profile)
+			})
+		})
+
+		// Trip & Seat Routes (Public)
+		api.Route("/trips", func(trips chi.Router) {
+			trips.Get("/search", tripHdl.SearchTrips)
+			trips.Get("/{tripID}/seats", tripHdl.GetTripSeats)
+		})
+	})
+
+	// 6. Graceful Server
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      r,
@@ -72,10 +107,10 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("[FATAL] Server closed with error: %v", err)
+			log.Fatalf("[FATAL] Server error: %v", err)
 		}
 	case sig := <-shutdown:
-		log.Printf("[SERVER] Received signal %v. Shutting down gracefully...", sig)
+		log.Printf("[SERVER] Shutting down cleanly on signal %v...", sig)
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutdownCancel()
 

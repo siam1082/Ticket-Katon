@@ -1,0 +1,80 @@
+================================================================================
+                    TICKET-KATON: FULL PROJECT ROADMAP & STEPS
+================================================================================
+
+1. PROJECT OVERVIEW & ARCHITECTURE
+--------------------------------------------------------------------------------
+- Purpose: High-concurrency ticket booking engine for Bus and Launch transport in Bangladesh.
+- Backend Tech Stack: Go (Golang) - high throughput, goroutine-based concurrency.
+- Primary Database: PostgreSQL (Supabase Connection Pooler) - relational data, ACID transactions.
+- Fast Cache & Locks: Redis (Upstash) - seat hold lock, distributed TTL, rate limiting.
+- Frontend Tech Stack: React / Next.js, Tailwind CSS, real-time seat countdown timer.
+
+
+2. POSTGRESQL DATABASE ENTITIES (SUMMARY)
+--------------------------------------------------------------------------------
+- users: Store accounts (Roles: CUSTOMER, OPERATOR_ADMIN, SUPER_ADMIN).
+- operators & vehicles: Bus/launch companies and vehicles with JSONB layout configs.
+- routes & trips: Departure/destination cities, timetable, pricing, trip status.
+- trip_seat_inventory: Live seat status tracking (AVAILABLE, HELD, BOOKED).
+- bookings & tickets: Unique PNR code, booking records, passenger info, and seats.
+- payments: Payment gateway records, status (INITIATED, SUCCESS, FAILED).
+
+
+3. STEP-BY-STEP IMPLEMENTATION ROADMAP
+--------------------------------------------------------------------------------
+
+[COMPLETED] STEP 1: CLOUD DATA LAYER & ENVIRONMENT SETUP
+- Supabase PostgreSQL setup and database pooler connection verified.
+- Upstash Redis instance connected and ping-tested via Go.
+- Database schema migration executed and demo trips/seats seeded.
+- Git repository initialized with root level .gitignore.
+
+STEP 2: BACKEND PROJECT STRUCTURE & REPOSITORY PATTERN
+- Setup standard Go project layout:
+  * cmd/api/main.go (entry point)
+  * internal/config (environment loader)
+  * internal/database (pgxpool & redis client singletons)
+  * internal/domain (data models & structs)
+  * internal/repository (raw SQL queries & DB operations)
+  * internal/service (business logic)
+  * internal/handler (HTTP controllers & routing)
+- Implement clean dependency injection and structured JSON logger.
+
+STEP 3: AUTHENTICATION & ACCESS CONTROL (RBAC)
+- User signup and login handlers with Bcrypt password hashing.
+- JWT token generator and validation middleware.
+- Role-based middleware guards (CustomerAuth, AdminOnly).
+- User profile endpoint.
+
+STEP 4: SEARCH & REAL-TIME SEAT INVENTORY API
+- Public search API: origin_city, destination_city, and travel date filter.
+- Dynamic seat layout projection API for specific trip (Bus/Launch layout JSON).
+- Return seat statuses (AVAILABLE, HELD, BOOKED) with exact pricing.
+
+STEP 5: HIGH-CONCURRENCY SEAT LOCKING ENGINE (REDIS)
+- Critical concurrency engine to prevent race conditions during high demand.
+- Redis Atomic operation (SETNX / Lua Script) to hold seats for a user.
+- 7 minutes (420 seconds) TTL lock per seat.
+- Background worker / database reconciliation to release expired holds.
+
+STEP 6: BOOKING CONFIRMATION & PAYMENT WORKFLOW
+- ACID Transaction in PostgreSQL:
+  * Validate active seat lock.
+  * Update trip_seat_inventory status to BOOKED.
+  * Create booking record with 12-char cryptographic PNR code.
+  * Insert individual tickets for passengers.
+- Payment gateway integration / webhook simulation (bKash, Nagad, SSLCommerz).
+
+STEP 7: FRONTEND APPLICATION (USER INTERACTION)
+- Landing page with transport type toggle (Bus vs Launch) and search bar.
+- Interactive seat selection grid (visual seat layout, cabin vs deck selection).
+- 7-minute real-time reverse countdown timer on seat hold.
+- Passenger details form and booking confirmation screen with printable ticket.
+
+STEP 8: RATE LIMITING, DOCKER & CLOUD DEPLOYMENT
+- IP-based token bucket rate limiter middleware to mitigate bot scraping/DDoS.
+- Dockerfile and docker-compose configuration.
+- Production environment variables setup and deployment to cloud container service.
+
+================================================================================

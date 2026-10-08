@@ -2,58 +2,86 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"ticket-katon-backend/internal/config"
+	"ticket-katon-backend/internal/database"
+	httpHandler "ticket-katon-backend/internal/handler/http"
+	"ticket-katon-backend/internal/service"
 )
 
 func main() {
-	_ = godotenv.Load()
-
-	dbURL := os.Getenv("DATABASE_URL")
-	redisURL := os.Getenv("REDIS_URL")
-
-	if dbURL == "" || redisURL == "" {
-		log.Fatal("ERROR: DATABASE_URL or REDIS_URL missing in .env")
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	cfg := config.LoadConfig()
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. PostgreSQL (Supabase) Test
-	fmt.Println("Connecting to Supabase PostgreSQL...")
-	pool, err := pgxpool.New(ctx, dbURL)
+	// 1. Init Database Connections
+	pgPool, err := database.NewPostgresPool(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Failed to initialize Postgres pool: %v", err)
+		log.Fatalf("[FATAL] Postgres connection failed: %v", err)
 	}
-	defer pool.Close()
+	defer pgPool.Close()
 
-	var tripCount int
-	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM trips;").Scan(&tripCount)
+	redisClient, err := database.NewRedisClient(ctx, cfg.RedisURL)
 	if err != nil {
-		log.Fatalf("Postgres ping failed: %v", err)
+		log.Fatalf("[FATAL] Redis connection failed: %v", err)
 	}
-	fmt.Printf("✅ PostgreSQL Connected successfully! Found %d scheduled trips.\n", tripCount)
+	defer redisClient.Close()
 
-	// 2. Redis (Upstash) Test
-	fmt.Println("Connecting to Upstash Redis...")
-	opt, err := redis.ParseURL(redisURL)
-	if err != nil {
-		log.Fatalf("Invalid Redis URL: %v", err)
+	// 2. Init Service & Handler
+	healthSvc := service.NewHealthService(pgPool, redisClient)
+	healthHdl := httpHandler.NewHealthHandler(healthSvc)
+
+	// 3. Router Setup
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(30 * time.Second))
+
+	r.Get("/health", healthHdl.HealthCheck)
+
+	// 4. Server with Graceful Shutdown
+	srv := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
-	rdb := redis.NewClient(opt)
-	defer rdb.Close()
 
-	pong, err := rdb.Ping(ctx).Result()
-	if err != nil {
-		log.Fatalf("Redis ping failed: %v", err)
+	serverErrors := make(chan error, 1)
+	go func() {
+		log.Printf("[SERVER] Ticket-Katon API running on port %s", cfg.Port)
+		serverErrors <- srv.ListenAndServe()
+	}()
+
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
+
+	select {
+	case err := <-serverErrors:
+		if !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("[FATAL] Server closed with error: %v", err)
+		}
+	case sig := <-shutdown:
+		log.Printf("[SERVER] Received signal %v. Shutting down gracefully...", sig)
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Fatalf("[FATAL] Graceful shutdown failed: %v", err)
+		}
+		log.Println("[SERVER] Server exited successfully.")
 	}
-	fmt.Printf("✅ Upstash Redis Connected successfully! Response: %s\n", pong)
-
-	fmt.Println("\n🎉 STEP 1 100% COMPLETE! Storage, Cloud DBs, and Schemas are active.")
 }

@@ -33,7 +33,10 @@ func (r *PostgresTripRepository) SearchTrips(ctx context.Context, params reposit
 			t.arrival_time,
 			t.base_fare,
 			COUNT(tsi.id) AS total_seats,
-			COUNT(tsi.id) FILTER (WHERE tsi.status::text = 'AVAILABLE') AS available_seats
+			COUNT(tsi.id) FILTER (
+				WHERE tsi.status::text = 'AVAILABLE' 
+				   OR (tsi.status::text = 'HELD' AND tsi.held_until IS NOT NULL AND tsi.held_until < NOW())
+			) AS available_seats
 		FROM trips t
 		JOIN routes r ON r.id = t.route_id
 		JOIN vehicles v ON v.id = t.vehicle_id
@@ -114,7 +117,14 @@ func (r *PostgresTripRepository) GetTripSeatLayout(ctx context.Context, tripID s
 	}
 
 	querySeats := `
-		SELECT seat_number, deck_or_class, fare, status::text
+		SELECT 
+			seat_number, 
+			deck_or_class, 
+			fare, 
+			CASE 
+				WHEN status::text = 'HELD' AND held_until IS NOT NULL AND held_until < NOW() THEN 'AVAILABLE'
+				ELSE status::text 
+			END AS effective_status
 		FROM trip_seat_inventory
 		WHERE trip_id = $1
 		ORDER BY seat_number ASC

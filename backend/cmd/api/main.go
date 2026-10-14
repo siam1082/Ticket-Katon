@@ -15,6 +15,7 @@ import (
 
 	"ticket-katon-backend/internal/config"
 	"ticket-katon-backend/internal/database"
+	"ticket-katon-backend/internal/domain"
 	httpHandler "ticket-katon-backend/internal/handler/http"
 	"ticket-katon-backend/internal/middleware"
 	"ticket-katon-backend/internal/pkg/token"
@@ -56,6 +57,7 @@ func main() {
 	authHdl := httpHandler.NewAuthHandler(authSvc)
 	tripHdl := httpHandler.NewTripHandler(tripSvc)
 	seatLockHdl := httpHandler.NewSeatLockHandler(seatLockSvc)
+	adminHdl := httpHandler.NewAdminHandler()
 
 	// 5. Router Setup
 	r := chi.NewRouter()
@@ -92,6 +94,24 @@ func main() {
 			seats.Use(middleware.AuthMiddleware(tokenMaker))
 			seats.Post("/hold", seatLockHdl.Hold)
 			seats.Post("/release", seatLockHdl.Release)
+		})
+
+		// Admin & Counter Sales Routes (Protected with JWT & RBAC)
+		api.Route("/admin", func(admin chi.Router) {
+			admin.Use(middleware.AuthMiddleware(tokenMaker))
+
+			// Counter Sales & Trip Schedules (Operator Admin & Super Admin)
+			admin.Group(func(sales chi.Router) {
+				sales.Use(middleware.RequireRole(domain.RoleOperatorAdmin, domain.RoleSuperAdmin))
+				sales.Post("/tickets/issue", adminHdl.IssueCounterTicket)
+				sales.Post("/trips", adminHdl.CreateTripSchedule)
+			})
+
+			// Super Admin Only (Platform DevOps / Software Engineers)
+			admin.Group(func(super chi.Router) {
+				super.Use(middleware.RequireRole(domain.RoleSuperAdmin))
+				// Platform-wide configs, operator onboarding, audit logs
+			})
 		})
 	})
 

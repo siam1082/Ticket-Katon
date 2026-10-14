@@ -49,11 +49,13 @@ func main() {
 	healthSvc := service.NewHealthService(pgPool, redisClient)
 	authSvc := service.NewAuthService(userRepo, tokenMaker)
 	tripSvc := service.NewTripService(tripRepo)
+	seatLockSvc := service.NewSeatLockService(redisClient)
 
 	// 4. Handlers
 	healthHdl := httpHandler.NewHealthHandler(healthSvc)
 	authHdl := httpHandler.NewAuthHandler(authSvc)
 	tripHdl := httpHandler.NewTripHandler(tripSvc)
+	seatLockHdl := httpHandler.NewSeatLockHandler(seatLockSvc)
 
 	// 5. Router Setup
 	r := chi.NewRouter()
@@ -83,6 +85,13 @@ func main() {
 		api.Route("/trips", func(trips chi.Router) {
 			trips.Get("/search", tripHdl.SearchTrips)
 			trips.Get("/{tripID}/seats", tripHdl.GetTripSeats)
+		})
+
+		// Seat Lock Routes (Protected with JWT)
+		api.Route("/seats", func(seats chi.Router) {
+			seats.Use(middleware.AuthMiddleware(tokenMaker))
+			seats.Post("/hold", seatLockHdl.Hold)
+			seats.Post("/release", seatLockHdl.Release)
 		})
 	})
 

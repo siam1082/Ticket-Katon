@@ -1,0 +1,174 @@
+================================================================================
+                    TICKET-KATON: FULL ARCHITECTURAL OVERVIEW
+================================================================================
+
+1. PROJECT SUMMARY & PROBLEM STATEMENT
+--------------------------------------------------------------------------------
+Ticket-Katon is a high-throughput, distributed booking engine engineered for
+multimodal inter-district transit (Buses and River Launches) across Bangladesh.
+
+The primary engineering challenge in transit booking systems (especially during
+Eid migrations or flash sales) is the "Double-Booking Problem": two passengers 
+attempting to book the exact same seat within the same millisecond. 
+
+Ticket-Katon solves this using a two-tier hybrid data architecture:
+- Layer 1 (In-Memory Concurrency): Redis handles sub-millisecond atomic seat holds 
+  with ephemeral TTLs to guarantee zero race conditions.
+- Layer 2 (Persistence & ACID Guarantees): PostgreSQL (via Supabase Connection 
+  Pooler) provides durable records, relational constraints, and financial audit logs.
+
+
+2. SYSTEM ARCHITECTURE & DATA FLOW
+--------------------------------------------------------------------------------
+[Client: Web / Mobile]
+       │
+       ▼ (HTTP JSON via Port 8080)
+[Go-Chi HTTP Router]
+       │
+       ├── Middleware Pipeline (RequestID, RealIP, Structured Logger, Timeout)
+       │
+       ├── JWT Authentication Guard (Extracts user_id into Request Context)
+       │
+       ▼
+[Service Layer]
+       │
+       ├── Reads / Writes Dynamic State  ──>  [Upstash Redis (Atomic Lua Engine)]
+       │                                     - 5-Min Seat Hold Lock (SETNX / TTL)
+       │                                     - Multi-Seat Atomicity
+       │
+       └── Durable ACID Transactions     ──>  [Supabase PostgreSQL (pgxpool)]
+                                             - Relational User / Trip Inventory
+                                             - Final Booking & Ticket Records
+
+
+3. TECHNOLOGY STACK RATIONALE
+--------------------------------------------------------------------------------
+* Go (Golang) v1.22+:
+  - Minimal memory footprint, native concurrency via goroutines.
+  - Predictable latency critical for high-concurrency ticket locking.
+
+* go-chi/chi v5:
+  - Lightweight, idiomatic HTTP router 100% compliant with standard net/http.
+  - Clean middleware composition and zero memory allocation overhead.
+
+* PostgreSQL (Supabase Connection Pooler):
+  - ACID-compliant transactional persistence.
+  - JSONB support to store complex, dynamic seat layouts (e.g., bus deck vs 
+    launch cabin arrangements) without schema alterations.
+
+* pgxpool (jackc/pgx/v5):
+  - High-performance native Go driver for PostgreSQL with robust connection pooling.
+
+* Redis (Upstash Serverless Redis):
+  - In-memory key-value store supporting atomic Lua scripting and native key TTLs.
+
+* Stateless JWT & Bcrypt:
+  - Token-based stateless authentication enabling horizontal scaling without 
+    session replication bottlenecks.
+
+
+4. DETAILED STEP-BY-STEP BREAKDOWN & STATUS
+--------------------------------------------------------------------------------
+
+[✔ COMPLETED] STEP 1: CLOUD DATA LAYER & ENVIRONMENT SETUP
+--------------------------------------------------------------------------------
+- Configured PostgreSQL connection pooling through Supabase to handle short-lived 
+  serverless connections cleanly.
+- Connected and ping-tested Upstash Redis instance via TLS (rediss://).
+- Designed and applied relational database schemas:
+  * users (Roles: CUSTOMER, OPERATOR_ADMIN, SUPER_ADMIN)
+  * operators & vehicles (Dynamic JSONB layout configuration)
+  * routes & trips (Schedules, cities, pricing)
+  * trip_seat_inventory (Seat statuses: AVAILABLE, HELD, BOOKED)
+- Seeded initial demo trips and bus/launch seat inventory.
+- Configured root .gitignore to avoid committing binaries and .env secrets.
+
+
+[✔ COMPLETED] STEP 2: CLEAN ARCHITECTURE & REPOSITORY PATTERN
+--------------------------------------------------------------------------------
+- Implemented standard Go enterprise layout to achieve strict separation of concerns:
+  * cmd/api/main.go: Application root, dependency injection, and HTTP server.
+  * internal/config: Environment variables parser (.env fallback).
+  * internal/database: PostgreSQL pgxpool and Redis connection singletons.
+  * internal/domain: Core domain models, entities, and validation rules.
+  * internal/repository: Raw SQL execution and database queries.
+  * internal/service: Pure business rules, domain orchestration, and cache logic.
+  * internal/handler/http: HTTP controllers, JSON request/response encoding.
+- Built graceful shutdown handling listening for OS signals (SIGINT, SIGTERM) to
+  close DB connection pools without dropping in-flight requests.
+
+
+[✔ COMPLETED] STEP 3: AUTHENTICATION & ACCESS CONTROL (RBAC)
+--------------------------------------------------------------------------------
+- Bcrypt password hashing to ensure secure credential storage at rest.
+- TokenMaker engine using HMAC-SHA256 for signing and validating JWT tokens.
+- Implemented AuthMiddleware:
+  * Intercepts HTTP Authorization Bearer tokens.
+  * Validates cryptographic signature and expiration.
+  * Injects validated user_id into standard context.Context.
+- Exposed Endpoints:
+  * POST /api/v1/auth/register
+  * POST /api/v1/auth/login
+  * GET  /api/v1/auth/profile (Protected)
+
+
+[✔ COMPLETED] STEP 4: SEARCH & REAL-TIME SEAT INVENTORY API
+--------------------------------------------------------------------------------
+- Public search API querying trips by origin_city, destination_city, and travel date.
+- Dynamic seat layout projection API:
+  * Parses vehicle JSONB layout (e.g., 2x2 bus layout, launch VIP cabins, deck seats).
+  * Maps real-time seat states (AVAILABLE, HELD, BOOKED) with exact tier pricing.
+- Exposed Endpoints:
+  * GET /api/v1/trips/search
+  * GET /api/v1/trips/{tripID}/seats
+
+
+[✔ COMPLETED] STEP 5: HIGH-CONCURRENCY SEAT LOCKING ENGINE (REDIS)
+--------------------------------------------------------------------------------
+- Problem Solved: Preventing partial reservations when multiple seats are requested
+  at once (e.g., user wants seats A1 and A2, but another user locks A2 simultaneously).
+- Atomic Multi-Seat Lua Scripting:
+  * Checks all requested keys in a single atomic pass inside Redis memory.
+  * If ANY seat is already taken, aborts instantly and locks zero seats.
+  * If ALL seats are free, locks all keys with the user_id in the same operation.
+- Ephemeral Lock Expiration (TTL):
+  * Set to 5 minutes (300 seconds).
+  * If the user abandons checkout, Redis automatically purges the keys, freeing 
+    the seats without requiring heavy background DB polling jobs.
+- Safe Release Lua Script:
+  * Ensures that only the user who owns the lock can prematurely release it.
+- Exposed Endpoints (Protected by JWT Auth):
+  * POST /api/v1/seats/hold
+  * POST /api/v1/seats/release
+
+
+[⏳ UPCOMING] STEP 6: BOOKING CONFIRMATION & PAYMENT WORKFLOW
+--------------------------------------------------------------------------------
+- Goal: Finalize reservation and convert ephemeral Redis holds into permanent DB records.
+- Implementation Plan:
+  * Validate active seat lock in Redis before initiating the database write.
+  * Begin PostgreSQL ACID transaction (pgx.Tx):
+      1. UPDATE trip_seat_inventory SET status = 'BOOKED' WHERE trip_id AND seat_number.
+      2. INSERT into bookings with a 12-character cryptographic PNR code.
+      3. INSERT passenger details into tickets table.
+      4. Release/delete the temporary Redis lock.
+      5. COMMIT transaction (or ROLLBACK on any failure).
+  * Integrate payment gateway simulation / webhook verification (bKash / Nagad).
+
+
+[⏳ UPCOMING] STEP 7: FRONTEND INTERACTION (NEXT.JS / REACT)
+--------------------------------------------------------------------------------
+- Landing page with transport mode toggle (Bus vs River Launch).
+- Interactive visual seat selection map reflecting real-time availability.
+- 5-minute reverse countdown timer tied to Redis TTL upon successful seat hold.
+- Passenger details input form and booking summary with downloadable PDF/ticket view.
+
+
+[⏳ UPCOMING] STEP 8: RATE LIMITING, DOCKER & CLOUD DEPLOYMENT
+--------------------------------------------------------------------------------
+- IP-based token bucket rate limiting middleware to prevent bot scraping and brute force.
+- Multi-stage Dockerfile producing a minimal, secure Go binary scratch image.
+- Docker Compose configuration for local replication.
+- Cloud deployment and production environment variable management.
+
+================================================================================

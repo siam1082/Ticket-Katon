@@ -2,34 +2,42 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { User, ShieldCheck } from 'lucide-react';
+import API from '../services/api';
 
 export default function Login() {
     const [roleType, setRoleType] = useState('user'); // 'user' or 'admin'
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setLoading(true);
 
-        if (!email || !password) {
-            setError('Please fill in all fields');
-            return;
+        try {
+            const endpoint = roleType === 'admin' ? '/admin/auth/login' : '/auth/login';
+            const response = await API.post(endpoint, {
+                email,
+                password
+            });
+
+            const { user, token } = response.data;
+            login(user, token, roleType);
+
+            if (roleType === 'admin') {
+                navigate('/admin');
+            } else {
+                navigate('/');
+            }
+        } catch (err) {
+            setError(err.response?.data?.message || 'Invalid credentials or login failed');
+        } finally {
+            setLoading(false);
         }
-
-        // Dummy token/user for UI step (পরবর্তীতে Go Backend API কল যুক্ত হবে)
-        const dummyUser = {
-            name: roleType === 'admin' ? 'Operator Admin' : 'Regular Passenger',
-            email: email,
-            role: roleType
-        };
-        const dummyToken = 'jwt-token-sample-xyz';
-
-        login(dummyUser, dummyToken, roleType);
-        navigate('/');
     };
 
     return (
@@ -37,7 +45,6 @@ export default function Login() {
             <div style={styles.card}>
                 <h2 style={styles.title}>Sign In to TicketKaton</h2>
 
-                {/* User vs Operator Admin Switcher */}
                 <div style={styles.tabContainer}>
                     <button
                         type="button"
@@ -74,7 +81,7 @@ export default function Login() {
                             type="text"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            placeholder={roleType === 'admin' ? 'counter@operator.com' : 'passenger@gmail.com'}
+                            placeholder={roleType === 'admin' ? 'admin@operator.com' : 'passenger@gmail.com'}
                             style={styles.input}
                             required
                         />
@@ -92,8 +99,8 @@ export default function Login() {
                         />
                     </div>
 
-                    <button type="submit" style={styles.submitBtn}>
-                        Login as {roleType === 'admin' ? 'Operator' : 'Passenger'}
+                    <button type="submit" style={styles.submitBtn} disabled={loading}>
+                        {loading ? 'Signing In...' : `Login as ${roleType === 'admin' ? 'Operator' : 'Passenger'}`}
                     </button>
                 </form>
 

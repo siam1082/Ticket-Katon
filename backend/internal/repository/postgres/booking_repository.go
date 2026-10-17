@@ -114,3 +114,58 @@ func (r *bookingRepository) CreateBookingWithSeats(
 
 	return nil
 }
+
+func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*domain.Booking, []domain.Ticket, error) {
+	booking := &domain.Booking{}
+	bookingQuery := `
+		SELECT id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at
+		FROM bookings
+		WHERE pnr_code = $1
+	`
+	err := r.db.QueryRow(ctx, bookingQuery, pnr).Scan(
+		&booking.ID,
+		&booking.UserID,
+		&booking.TripID,
+		&booking.PNRCode,
+		&booking.TotalAmount,
+		&booking.DiscountAmount,
+		&booking.Status,
+		&booking.CreatedAt,
+		&booking.UpdatedAt,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("booking not found: %w", err)
+	}
+
+	ticketsQuery := `
+		SELECT id, booking_id, seat_number, passenger_name, passenger_phone, passenger_gender, ticket_number, created_at
+		FROM tickets
+		WHERE booking_id = $1
+	`
+	rows, err := r.db.Query(ctx, ticketsQuery, booking.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query tickets: %w", err)
+	}
+	defer rows.Close()
+
+	var tickets []domain.Ticket
+	for rows.Next() {
+		var t domain.Ticket
+		if err := rows.Scan(
+			&t.ID,
+			&t.BookingID,
+			&t.SeatNumber,
+			&t.PassengerName,
+			&t.PassengerPhone,
+			&t.PassengerGender,
+			&t.TicketNumber,
+			&t.CreatedAt,
+		); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan ticket: %w", err)
+		}
+		tickets = append(tickets, t)
+	}
+
+	return booking, tickets, nil
+}
+

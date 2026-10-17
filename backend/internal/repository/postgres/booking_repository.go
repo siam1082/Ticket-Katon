@@ -168,7 +168,6 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 
 	return booking, tickets, nil
 }
-
 func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID string) ([]domain.Booking, error) {
 	query := `
 		SELECT id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at

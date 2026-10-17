@@ -168,4 +168,37 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 
 	return booking, tickets, nil
 }
+func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID string) ([]domain.Booking, error) {
+	query := `
+		SELECT id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at
+		FROM bookings
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query user bookings: %w", err)
+	}
+	defer rows.Close()
 
+	var bookings []domain.Booking
+	for rows.Next() {
+		var b domain.Booking
+		if err := rows.Scan(
+			&b.ID,
+			&b.UserID,
+			&b.TripID,
+			&b.PNRCode,
+			&b.TotalAmount,
+			&b.DiscountAmount,
+			&b.Status,
+			&b.CreatedAt,
+			&b.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan booking: %w", err)
+		}
+		bookings = append(bookings, b)
+	}
+
+	return bookings, nil
+}

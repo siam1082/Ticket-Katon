@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { UserPlus } from 'lucide-react';
+import API from '../services/api';
 
 export default function Register() {
     const [formData, setFormData] = useState({
@@ -12,6 +13,7 @@ export default function Register() {
         confirmPassword: ''
     });
     const [error, setError] = useState('');
+    const [loading, setLoading] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
 
@@ -22,31 +24,32 @@ export default function Register() {
         });
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
-
-        if (!formData.name || !formData.email || !formData.phone || !formData.password) {
-            setError('Please fill in all required fields');
-            return;
-        }
 
         if (formData.password !== formData.confirmPassword) {
             setError('Passwords do not match');
             return;
         }
 
-        // Dummy user object for initial UI flow (Go backend API integration-এর জন্য প্রস্তুত)
-        const newUser = {
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone,
-            role: 'user'
-        };
-        const dummyToken = 'jwt-sample-reg-token';
+        setLoading(true);
+        try {
+            const response = await API.post('/auth/register', {
+                name: formData.name,
+                email: formData.email,
+                phone: formData.phone,
+                password: formData.password,
+            });
 
-        login(newUser, dummyToken, 'user');
-        navigate('/');
+            const { user, token } = response.data;
+            login(user, token, user?.role || 'user');
+            navigate('/');
+        } catch (err) {
+            setError(err.response?.data?.message || 'Registration failed. Try again.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     return (
@@ -126,8 +129,8 @@ export default function Register() {
                         />
                     </div>
 
-                    <button type="submit" style={styles.submitBtn}>
-                        Create Account
+                    <button type="submit" style={styles.submitBtn} disabled={loading}>
+                        {loading ? 'Creating Account...' : 'Create Account'}
                     </button>
                 </form>
 

@@ -64,5 +64,53 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		return fmt.Errorf("failed to insert booking: %w", err)
 	}
 
-	
+	// ৩. Tickets টেবিলে প্রতিটি টিকিটের তথ্য ইনসার্ট করা
+	ticketQuery := `
+		INSERT INTO tickets (id, booking_id, seat_number, passenger_name, passenger_phone, passenger_gender, ticket_number, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+	`
+	for _, ticket := range tickets {
+		_, err = tx.Exec(
+			ctx,
+			ticketQuery,
+			ticket.ID,
+			ticket.BookingID,
+			ticket.SeatNumber,
+			ticket.PassengerName,
+			ticket.PassengerPhone,
+			ticket.PassengerGender,
+			ticket.TicketNumber,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert ticket for seat %s: %w", ticket.SeatNumber, err)
+		}
+	}
+
+	// ৪. Payments টেবিলে পেমেন্ট রেকর্ড ইনসার্ট করা
+	paymentQuery := `
+		INSERT INTO payments (id, booking_id, gateway, transaction_id, gateway_payment_id, amount, currency, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+	`
+	_, err = tx.Exec(
+		ctx,
+		paymentQuery,
+		payment.ID,
+		payment.BookingID,
+		payment.Gateway,
+		payment.TransactionID,
+		payment.GatewayPaymentID,
+		payment.Amount,
+		payment.Currency,
+		payment.Status,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to insert payment record: %w", err)
+	}
+
+	// ট্রানজেকশন সফলভাবে সম্পন্ন করা
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }

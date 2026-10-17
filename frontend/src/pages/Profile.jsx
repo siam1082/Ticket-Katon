@@ -1,35 +1,36 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { User, Mail, Shield, Ticket, Calendar, Clock } from 'lucide-react';
+import API from '../services/api';
 
 export default function Profile() {
     const { user, isAuthenticated, role } = useAuth();
+    const [bookings, setBookings] = useState([]);
+    const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
     useEffect(() => {
         if (!isAuthenticated) {
             navigate('/login');
+            return;
         }
+
+        const fetchMyBookings = async () => {
+            try {
+                const res = await API.get('/bookings/my');
+                setBookings(res.data?.data || res.data || []);
+            } catch (err) {
+                console.error('Failed to fetch user bookings', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchMyBookings();
     }, [isAuthenticated, navigate]);
 
     if (!isAuthenticated) return null;
-
-    // ডামি বুকিং ডেটা (পরবর্তীতে Go Backend API থেকে ফেচ হবে)
-    const dummyBookings = [
-        {
-            id: 'TCK-9481',
-            mode: 'Bus',
-            operator: 'Green Line Paribahan',
-            from: 'Dhaka',
-            to: 'Sylhet',
-            date: '2026-11-05',
-            time: '08:30 AM',
-            seats: ['A1', 'A2'],
-            fare: '1600 BDT',
-            status: 'Confirmed'
-        }
-    ];
 
     return (
         <div style={styles.container}>
@@ -38,7 +39,7 @@ export default function Profile() {
                     <User size={36} color="#ffffff" />
                 </div>
                 <div>
-                    <h2 style={styles.userName}>{user?.name || 'Passenger Name'}</h2>
+                    <h2 style={styles.userName}>{user?.name || 'Passenger'}</h2>
                     <div style={styles.badgeRow}>
                         <span style={styles.emailText}><Mail size={14} /> {user?.email || 'N/A'}</span>
                         <span style={styles.roleBadge}><Shield size={12} /> {role?.toUpperCase() || 'USER'}</span>
@@ -52,19 +53,21 @@ export default function Profile() {
                     <h3 style={styles.sectionTitle}>My Booked Tickets</h3>
                 </div>
 
-                {dummyBookings.length === 0 ? (
-                    <p style={styles.emptyText}>No active bookings found.</p>
+                {loading ? (
+                    <p style={styles.emptyText}>Loading bookings...</p>
+                ) : bookings.length === 0 ? (
+                    <p style={styles.emptyText}>No bookings found under this account.</p>
                 ) : (
                     <div style={styles.ticketGrid}>
-                        {dummyBookings.map((ticket) => (
-                            <div key={ticket.id} style={styles.ticketCard}>
+                        {bookings.map((ticket) => (
+                            <div key={ticket.id || ticket.booking_id} style={styles.ticketCard}>
                                 <div style={styles.ticketTop}>
                                     <div>
-                                        <span style={styles.ticketMode}>{ticket.mode}</span>
-                                        <h4 style={styles.operatorName}>{ticket.operator}</h4>
-                                        <span style={styles.ticketId}>Booking ID: {ticket.id}</span>
+                                        <span style={styles.ticketMode}>{ticket.mode || 'Trip'}</span>
+                                        <h4 style={styles.operatorName}>{ticket.operator || 'Operator'}</h4>
+                                        <span style={styles.ticketId}>ID: {ticket.id || ticket.booking_id}</span>
                                     </div>
-                                    <span style={styles.statusBadge}>{ticket.status}</span>
+                                    <span style={styles.statusBadge}>{ticket.status || 'Confirmed'}</span>
                                 </div>
 
                                 <div style={styles.routeRow}>
@@ -74,11 +77,11 @@ export default function Profile() {
                                     </div>
                                     <div>
                                         <small style={styles.routeLabel}>Seats</small>
-                                        <p style={styles.routeValue}>{ticket.seats.join(', ')}</p>
+                                        <p style={styles.routeValue}>{Array.isArray(ticket.seats) ? ticket.seats.join(', ') : ticket.seats}</p>
                                     </div>
                                     <div>
-                                        <small style={styles.routeLabel}>Total Fare</small>
-                                        <p style={styles.routeValue}>{ticket.fare}</p>
+                                        <small style={styles.routeLabel}>Fare</small>
+                                        <p style={styles.routeValue}>{ticket.fare || ticket.total_amount} BDT</p>
                                     </div>
                                 </div>
 

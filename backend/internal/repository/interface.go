@@ -25,12 +25,8 @@ type TripRepository interface {
 }
 
 type BookingRepository interface {
-	// CreateBookingWithSeats একটি অ্যাটমিক ট্রানজেকশনে সিট বুক, টিকিট ইস্যু ও পেমেন্ট রেকর্ড সম্পন্ন করে
 	CreateBookingWithSeats(ctx context.Context, booking *domain.Booking, tickets []domain.Ticket, payment *domain.Payment, seatNumbers []string) error
-	
-	// GetBookingByPNR PNR কোড দিয়ে বুকিং তথ্য রিটার্ন করে
 	GetBookingByPNR(ctx context.Context, pnr string) (*domain.Booking, []domain.Ticket, error)
-	
-	// GetBookingsByUserID নির্দিষ্ট ইউজারের সব বুকিং হিস্ট্রি রিটার্ন করে
 	GetBookingsByUserID(ctx context.Context, userID string) ([]domain.Booking, error)
+	GetSeatsFare(ctx context.Context, tripID string, seatNumbers []string) (float64, error)
 }

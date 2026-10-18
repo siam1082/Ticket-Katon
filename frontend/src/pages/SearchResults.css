@@ -1,0 +1,91 @@
+.gov-search-results {
+  width: min(100% - 32px, 1000px);
+  margin: 28px auto 48px;
+}
+
+.gov-search-results .card {
+  border: 1px solid #e2eaf5;
+  border-radius: 10px;
+  padding: 22px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
+}
+
+.gov-search-results .card-title {
+  margin: 0 0 8px;
+  color: #172033;
+  font-size: 21px;
+}
+
+.gov-search-results .muted {
+  color: #64748b;
+}
+
+.results-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.result-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid #e2eaf5;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fbfdff;
+}
+
+.result-item > div:first-child {
+  display: grid;
+  gap: 6px;
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.result-meta .price {
+  color: #0b3d91;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.result-meta .btn-primary {
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: #fff;
+  background: #0b3d91;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.result-meta .btn-primary:hover {
+  background: #0b5bd3;
+}
+
+@media (max-width: 650px) {
+  .gov-search-results {
+    width: min(100% - 20px, 1000px);
+    margin-top: 18px;
+  }
+
+  .result-item,
+  .result-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .result-meta {
+    gap: 10px;
+  }
+}

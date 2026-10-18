@@ -2,8 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
@@ -15,6 +17,20 @@ type bookingRepository struct {
 
 func NewBookingRepository(db *pgxpool.Pool) repository.BookingRepository {
 	return &bookingRepository{db: db}
+}
+
+func (r *bookingRepository) GetSeatsFare(ctx context.Context, tripID string, seatNumbers []string) (float64, error) {
+	query := `
+		SELECT COALESCE(SUM(fare), 0)
+		FROM trip_seat_inventory
+		WHERE trip_id = $1 AND seat_number = ANY($2)
+	`
+	var totalFare float64
+	err := r.db.QueryRow(ctx, query, tripID, seatNumbers).Scan(&totalFare)
+	if err != nil {
+		return 0, fmt.Errorf("failed to calculate seats fare: %w", err)
+	}
+	return totalFare, nil
 }
 
 func (r *bookingRepository) CreateBookingWithSeats(
@@ -58,13 +74,13 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		booking.PNRCode,
 		booking.TotalAmount,
 		booking.DiscountAmount,
-		booking.Status,
+		string(booking.Status),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert booking: %w", err)
 	}
 
-	// ৩. Tickets টেবিলে প্রতিটি টিকিটের তথ্য ইনসার্ট করা
+	// ৩. Tickets টেবিলে টিকিটের তথ্য ইনসার্ট করা
 	ticketQuery := `
 		INSERT INTO tickets (id, booking_id, seat_number, passenger_name, passenger_phone, passenger_gender, ticket_number, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -96,18 +112,17 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		paymentQuery,
 		payment.ID,
 		payment.BookingID,
-		payment.Gateway,
+		string(payment.Gateway),
 		payment.TransactionID,
 		payment.GatewayPaymentID,
 		payment.Amount,
 		payment.Currency,
-		payment.Status,
+		string(payment.Status),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to insert payment record: %w", err)
 	}
 
-	// ট্রানজেকশন সফলভাবে সম্পন্ন করা
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
@@ -122,6 +137,7 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 		FROM bookings
 		WHERE pnr_code = $1
 	`
+	var statusStr string
 	err := r.db.QueryRow(ctx, bookingQuery, pnr).Scan(
 		&booking.ID,
 		&booking.UserID,
@@ -129,13 +145,17 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 		&booking.PNRCode,
 		&booking.TotalAmount,
 		&booking.DiscountAmount,
-		&booking.Status,
+		&statusStr,
 		&booking.CreatedAt,
 		&booking.UpdatedAt,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("booking not found: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, fmt.Errorf("booking not found")
+		}
+		return nil, nil, fmt.Errorf("database query error: %w", err)
 	}
+	booking.Status = domain.BookingStatus(statusStr)
 
 	ticketsQuery := `
 		SELECT id, booking_id, seat_number, passenger_name, passenger_phone, passenger_gender, ticket_number, created_at
@@ -165,6 +185,9 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 		}
 		tickets = append(tickets, t)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("tickets row iteration error: %w", err)
+	}
 
 	return booking, tickets, nil
 }
@@ -184,6 +207,7 @@ func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID stri
 	var bookings []domain.Booking
 	for rows.Next() {
 		var b domain.Booking
+		var statusStr string
 		if err := rows.Scan(
 			&b.ID,
 			&b.UserID,
@@ -191,13 +215,17 @@ func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID stri
 			&b.PNRCode,
 			&b.TotalAmount,
 			&b.DiscountAmount,
-			&b.Status,
+			&statusStr,
 			&b.CreatedAt,
 			&b.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan booking: %w", err)
 		}
+		b.Status = domain.BookingStatus(statusStr)
 		bookings = append(bookings, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("bookings row iteration error: %w", err)
 	}
 
 	return bookings, nil

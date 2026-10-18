@@ -22,18 +22,15 @@ type BookingService interface {
 
 type bookingService struct {
 	bookingRepo repository.BookingRepository
-	tripRepo    repository.TripRepository
 	redisClient *redis.Client
 }
 
 func NewBookingService(
 	bookingRepo repository.BookingRepository,
-	tripRepo repository.TripRepository,
 	redisClient *redis.Client,
 ) BookingService {
 	return &bookingService{
 		bookingRepo: bookingRepo,
-		tripRepo:    tripRepo,
 		redisClient: redisClient,
 	}
 }
@@ -57,6 +54,10 @@ func (s *bookingService) ConfirmBooking(
 	userID string,
 	req *domain.ConfirmBookingRequest,
 ) (*domain.ConfirmBookingResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("booking request is required")
+	}
+
 	// ০. ইনপুট ইনভ্যালিডেশন: সিট সংখ্যা এবং প্যাসেঞ্জার সংখ্যা সমান কিনা যাচাই
 	if len(req.Seats) == 0 {
 		return nil, fmt.Errorf("at least one seat must be selected")
@@ -75,13 +76,12 @@ func (s *bookingService) ConfirmBooking(
 		}
 	}
 
-	// ২. ট্রিপের ফেয়ার সংগ্রহ করে টোটাল ক্যালকুলেট করা
-	trip, err := s.tripRepo.GetTripByID(ctx, req.TripID)
+	// ২. নির্বাচিত সিটগুলোর ফেয়ার সংগ্রহ করে টোটাল ক্যালকুলেট করা
+	totalAmount, err := s.bookingRepo.GetSeatsFare(ctx, req.TripID, req.Seats)
 	if err != nil {
-		return nil, fmt.Errorf("trip details not found: %w", err)
+		return nil, fmt.Errorf("failed to calculate seats fare: %w", err)
 	}
 
-	totalAmount := trip.PricePerSeat * float64(len(req.Seats))
 	bookingID := uuid.New().String()
 	pnrCode := generatePNR()
 
@@ -92,7 +92,7 @@ func (s *bookingService) ConfirmBooking(
 		PNRCode:        pnrCode,
 		TotalAmount:    totalAmount,
 		DiscountAmount: 0.0,
-		Status:         domain.BookingConfirmed,
+		Status:         domain.BookingStatusConfirmed,
 	}
 
 	// ৩. প্যাসেঞ্জার টিকিট স্ট্রাকচার রেডি করা
@@ -119,7 +119,7 @@ func (s *bookingService) ConfirmBooking(
 		GatewayPaymentID: req.Payment.TransactionID,
 		Amount:           totalAmount,
 		Currency:         "BDT",
-		Status:           domain.PaymentSuccess,
+		Status:           domain.PaymentStatusSuccess,
 	}
 
 	// ৫. PostgreSQL ACID ট্রানজেকশনে ডাটাবেজে এক্সিকিউট করা

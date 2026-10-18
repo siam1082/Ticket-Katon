@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
+
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -73,26 +74,26 @@ func seatHoldKey(tripID, seat string) string {
 // validateConfirmRequest checks the request shape before touching Redis or the database.
 func validateConfirmRequest(req *domain.ConfirmBookingRequest) error {
 	if strings.TrimSpace(req.TripID) == "" {
-		return fmt.Errorf("trip_id is required")
+		return domain.NewBookingError(domain.ErrBookingInvalid, "trip_id is required")
 	}
 	if len(req.Seats) == 0 {
-		return fmt.Errorf("at least one seat must be selected")
+		return domain.NewBookingError(domain.ErrBookingInvalid, "at least one seat must be selected")
 	}
 	if len(req.Seats) > maxSeatsPerBooking {
-		return fmt.Errorf("a maximum of %d seats can be booked at once", maxSeatsPerBooking)
+		return domain.NewBookingError(domain.ErrBookingInvalid, "a maximum of %d seats can be booked at once", maxSeatsPerBooking)
 	}
 	if len(req.Seats) != len(req.Passengers) {
-		return fmt.Errorf("seat count (%d) and passenger count (%d) mismatch", len(req.Seats), len(req.Passengers))
+		return domain.NewBookingError(domain.ErrBookingInvalid, "seat count (%d) and passenger count (%d) mismatch", len(req.Seats), len(req.Passengers))
 	}
 
 	// Seats must be unique
 	seatSet := make(map[string]bool, len(req.Seats))
 	for _, seat := range req.Seats {
 		if strings.TrimSpace(seat) == "" {
-			return fmt.Errorf("seat number cannot be empty")
+			return domain.NewBookingError(domain.ErrBookingInvalid, "seat number cannot be empty")
 		}
 		if seatSet[seat] {
-			return fmt.Errorf("duplicate seat requested: %s", seat)
+			return domain.NewBookingError(domain.ErrBookingInvalid, "duplicate seat requested: %s", seat)
 		}
 		seatSet[seat] = true
 	}
@@ -101,24 +102,24 @@ func validateConfirmRequest(req *domain.ConfirmBookingRequest) error {
 	assigned := make(map[string]bool, len(req.Passengers))
 	for _, p := range req.Passengers {
 		if !seatSet[p.SeatNumber] {
-			return fmt.Errorf("passenger assigned to unrequested seat: %s", p.SeatNumber)
+			return domain.NewBookingError(domain.ErrBookingInvalid, "passenger assigned to unrequested seat: %s", p.SeatNumber)
 		}
 		if assigned[p.SeatNumber] {
-			return fmt.Errorf("more than one passenger assigned to seat %s", p.SeatNumber)
+			return domain.NewBookingError(domain.ErrBookingInvalid, "more than one passenger assigned to seat %s", p.SeatNumber)
 		}
 		assigned[p.SeatNumber] = true
 
 		if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Phone) == "" {
-			return fmt.Errorf("passenger name and phone are required for seat %s", p.SeatNumber)
+			return domain.NewBookingError(domain.ErrBookingInvalid, "passenger name and phone are required for seat %s", p.SeatNumber)
 		}
 	}
 
 	// Payment info
 	if !req.Payment.Gateway.IsValid() {
-		return fmt.Errorf("unsupported payment gateway: %q", req.Payment.Gateway)
+		return domain.NewBookingError(domain.ErrBookingInvalid, "unsupported payment gateway: %q", req.Payment.Gateway)
 	}
 	if strings.TrimSpace(req.Payment.TransactionID) == "" {
-		return fmt.Errorf("payment transaction_id is required")
+		return domain.NewBookingError(domain.ErrBookingInvalid, "payment transaction_id is required")
 	}
 
 	return nil
@@ -131,13 +132,13 @@ func (s *bookingService) verifyHolds(ctx context.Context, tripID, userID string,
 
 		heldBy, err := s.redisClient.Get(ctx, key).Result()
 		if err == redis.Nil {
-			return fmt.Errorf("hold on seat %s has expired", seat)
+			return domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
 		}
 		if err != nil {
 			return fmt.Errorf("failed to verify seat hold: %w", err)
 		}
 		if heldBy != userID {
-			return fmt.Errorf("seat %s is held by another user", seat)
+			return domain.NewBookingError(domain.ErrHoldInvalid, "seat %s is held by another user", seat)
 		}
 
 		ttl, err := s.redisClient.TTL(ctx, key).Result()
@@ -146,7 +147,7 @@ func (s *bookingService) verifyHolds(ctx context.Context, tripID, userID string,
 		}
 		// -2: key vanished between GET and TTL. -1: no expiry set (fine).
 		if ttl == -2 || (ttl >= 0 && ttl < minHoldTTL) {
-			return fmt.Errorf("hold on seat %s has expired", seat)
+			return domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
 		}
 	}
 	return nil
@@ -171,7 +172,7 @@ func (s *bookingService) ConfirmBooking(
 	totalAmount, err := s.bookingRepo.GetSeatsFare(ctx, req.TripID, req.Seats)
 	if err != nil {
 		if errors.Is(err, repository.ErrSeatsUnavailable) {
-			return nil, fmt.Errorf("one or more seats are invalid for this trip")
+			return nil, domain.NewBookingError(domain.ErrBookingInvalid, "one or more seats are invalid for this trip")
 		}
 		return nil, fmt.Errorf("failed to fetch seat fares: %w", err)
 	}
@@ -190,6 +191,10 @@ func (s *bookingService) ConfirmBooking(
 	// 3. Build tickets
 	tickets := make([]domain.Ticket, 0, len(req.Passengers))
 	for _, p := range req.Passengers {
+		tktNum, err := generateTicketNumber(p.SeatNumber)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate ticket number: %w", err)
+		}
 		tickets = append(tickets, domain.Ticket{
 			ID:              uuid.New().String(),
 			BookingID:       bookingID,
@@ -197,7 +202,7 @@ func (s *bookingService) ConfirmBooking(
 			PassengerName:   p.Name,
 			PassengerPhone:  p.Phone,
 			PassengerGender: p.Gender,
-			TicketNumber:    generateTicketNumber(p.SeatNumber),
+			TicketNumber:    tktNum,
 			CreatedAt:       time.Now(),
 		})
 	}
@@ -232,9 +237,9 @@ func (s *bookingService) ConfirmBooking(
 	if txErr != nil {
 		switch {
 		case errors.Is(txErr, repository.ErrSeatsUnavailable):
-			return nil, fmt.Errorf("one or more seats are already booked")
+			return nil, domain.NewBookingError(domain.ErrSeatsTaken, "one or more seats are already booked")
 		case errors.Is(txErr, repository.ErrDuplicateTransaction):
-			return nil, fmt.Errorf("this payment transaction has already been used")
+			return nil, domain.NewBookingError(domain.ErrPaymentDuplicate, "this payment transaction has already been used")
 		case errors.Is(txErr, repository.ErrDuplicatePNR):
 			return nil, fmt.Errorf("could not generate a unique PNR, please try again")
 		}
@@ -250,13 +255,14 @@ func (s *bookingService) ConfirmBooking(
 	s.redisClient.Del(ctx, keys...)
 
 	return &domain.ConfirmBookingResponse{
-		BookingID:     booking.ID,
-		PNRCode:       booking.PNRCode,
-		TripID:        booking.TripID,
-		TotalAmount:   booking.TotalAmount,
-		Status:        booking.Status,
-		Tickets:       tickets,
-		PaymentStatus: payment.Status,
+		BookingID:      booking.ID,
+		PNRCode:        booking.PNRCode,
+		TripID:         booking.TripID,
+		TotalAmount:    booking.TotalAmount,
+		DiscountAmount: booking.DiscountAmount,
+		Status:         booking.Status,
+		Tickets:        tickets,
+		PaymentStatus:  payment.Status,
 	}, nil
 }
 

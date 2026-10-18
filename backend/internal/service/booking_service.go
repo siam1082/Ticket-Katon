@@ -57,6 +57,13 @@ func (s *bookingService) ConfirmBooking(
 	userID string,
 	req *domain.ConfirmBookingRequest,
 ) (*domain.ConfirmBookingResponse, error) {
+	// ০. ইনপুট ইনভ্যালিডেশন: সিট সংখ্যা এবং প্যাসেঞ্জার সংখ্যা সমান কিনা যাচাই
+	if len(req.Seats) == 0 {
+		return nil, fmt.Errorf("at least one seat must be selected")
+	}
+	if len(req.Seats) != len(req.Passengers) {
+		return nil, fmt.Errorf("number of seats (%d) does not match passenger count (%d)", len(req.Seats), len(req.Passengers))
+	}
 	// ১. Redis Seat Hold Validation: নিশ্চিত করা সিটগুলো এই ইউজারের দখলেই আছে
 	for _, seat := range req.Seats {
 		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)

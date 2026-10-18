@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,6 +13,18 @@ import (
 	"github.com/redis/go-redis/v9"
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
+)
+
+const (
+	// maxSeatsPerBooking limits how many seats one booking can contain. Adjust as needed.
+	maxSeatsPerBooking = 6
+
+	// minHoldTTL: if a seat hold has less than this left, treat it as expired,
+	// so the hold can't lapse (and be taken by someone else) mid-transaction.
+	minHoldTTL = 5 * time.Second
+
+	// maxPNRAttempts: retries when a generated PNR collides with an existing one.
+	maxPNRAttempts = 3
 )
 
 type BookingService interface {
@@ -35,21 +48,108 @@ func NewBookingService(
 	}
 }
 
-// ১২ অক্ষরের ক্রিপ্টোগ্রাফিক ইউনিক PNR (TK- + 8 Hex chars = 11-12 chars, high entropy)
+// generatePNR returns a PNR like "TK-A1B2C3D4E5" ("TK-" + 10 hex chars, 40 bits of randomness).
 func generatePNR() (string, error) {
-	bytes := make([]byte, 5)
-	if _, err := rand.Read(bytes); err != nil {
+	b := make([]byte, 5)
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("TK-%s", strings.ToUpper(hex.EncodeToString(bytes))), nil
+	return "TK-" + strings.ToUpper(hex.EncodeToString(b)), nil
 }
 
+// generateTicketNumber returns a ticket number like "TKT-A1-A1B2C3D4E5".
 func generateTicketNumber(seatNumber string) (string, error) {
-	bytes := make([]byte, 3)
-	if _, err := rand.Read(bytes); err != nil {
+	b := make([]byte, 5)
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(bytes))), nil
+	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(b))), nil
+}
+
+func seatHoldKey(tripID, seat string) string {
+	return fmt.Sprintf("seat_hold:%s:%s", tripID, seat)
+}
+
+// validateConfirmRequest checks the request shape before touching Redis or the database.
+func validateConfirmRequest(req *domain.ConfirmBookingRequest) error {
+	if strings.TrimSpace(req.TripID) == "" {
+		return fmt.Errorf("trip_id is required")
+	}
+	if len(req.Seats) == 0 {
+		return fmt.Errorf("at least one seat must be selected")
+	}
+	if len(req.Seats) > maxSeatsPerBooking {
+		return fmt.Errorf("a maximum of %d seats can be booked at once", maxSeatsPerBooking)
+	}
+	if len(req.Seats) != len(req.Passengers) {
+		return fmt.Errorf("seat count (%d) and passenger count (%d) mismatch", len(req.Seats), len(req.Passengers))
+	}
+
+	// Seats must be unique
+	seatSet := make(map[string]bool, len(req.Seats))
+	for _, seat := range req.Seats {
+		if strings.TrimSpace(seat) == "" {
+			return fmt.Errorf("seat number cannot be empty")
+		}
+		if seatSet[seat] {
+			return fmt.Errorf("duplicate seat requested: %s", seat)
+		}
+		seatSet[seat] = true
+	}
+
+	// Each passenger must map to exactly one requested seat
+	assigned := make(map[string]bool, len(req.Passengers))
+	for _, p := range req.Passengers {
+		if !seatSet[p.SeatNumber] {
+			return fmt.Errorf("passenger assigned to unrequested seat: %s", p.SeatNumber)
+		}
+		if assigned[p.SeatNumber] {
+			return fmt.Errorf("more than one passenger assigned to seat %s", p.SeatNumber)
+		}
+		assigned[p.SeatNumber] = true
+
+		if strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Phone) == "" {
+			return fmt.Errorf("passenger name and phone are required for seat %s", p.SeatNumber)
+		}
+	}
+
+	// Payment info
+	if !req.Payment.Gateway.IsValid() {
+		return fmt.Errorf("unsupported payment gateway: %q", req.Payment.Gateway)
+	}
+	if strings.TrimSpace(req.Payment.TransactionID) == "" {
+		return fmt.Errorf("payment transaction_id is required")
+	}
+
+	return nil
+}
+
+// verifyHolds makes sure every seat is held by this user and the hold won't expire imminently.
+func (s *bookingService) verifyHolds(ctx context.Context, tripID, userID string, seats []string) error {
+	for _, seat := range seats {
+		key := seatHoldKey(tripID, seat)
+
+		heldBy, err := s.redisClient.Get(ctx, key).Result()
+		if err == redis.Nil {
+			return fmt.Errorf("hold on seat %s has expired", seat)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to verify seat hold: %w", err)
+		}
+		if heldBy != userID {
+			return fmt.Errorf("seat %s is held by another user", seat)
+		}
+
+		ttl, err := s.redisClient.TTL(ctx, key).Result()
+		if err != nil {
+			return fmt.Errorf("failed to verify seat hold: %w", err)
+		}
+		// -2: key vanished between GET and TTL. -1: no expiry set (fine).
+		if ttl == -2 || (ttl >= 0 && ttl < minHoldTTL) {
+			return fmt.Errorf("hold on seat %s has expired", seat)
+		}
+	}
+	return nil
 }
 
 func (s *bookingService) ConfirmBooking(
@@ -57,68 +157,38 @@ func (s *bookingService) ConfirmBooking(
 	userID string,
 	req *domain.ConfirmBookingRequest,
 ) (*domain.ConfirmBookingResponse, error) {
-	// ০. ইনপুট ইনভ্যালিডেশন
-	if len(req.Seats) == 0 {
-		return nil, fmt.Errorf("at least one seat must be selected")
-	}
-	if len(req.Seats) != len(req.Passengers) {
-		return nil, fmt.Errorf("seat count (%d) and passenger count (%d) mismatch", len(req.Seats), len(req.Passengers))
+	// 0. Input validation
+	if err := validateConfirmRequest(req); err != nil {
+		return nil, err
 	}
 
-	// সিট ভ্যালিডেশন: প্রতিটি প্যাসেঞ্জারের সিট সিলেক্টেড সিট লিস্টে আছে কিনা এবং ডুপ্লিকেট রোধ
-	seatMap := make(map[string]bool)
-	for _, seat := range req.Seats {
-		if seatMap[seat] {
-			return nil, fmt.Errorf("duplicate seat requested: %s", seat)
-		}
-		seatMap[seat] = true
+	// 1. Redis seat hold validation
+	if err := s.verifyHolds(ctx, req.TripID, userID, req.Seats); err != nil {
+		return nil, err
 	}
 
-	for _, p := range req.Passengers {
-		if !seatMap[p.SeatNumber] {
-			return nil, fmt.Errorf("passenger assigned to unheld seat: %s", p.SeatNumber)
-		}
-	}
-
-	// ১. Redis Seat Hold Validation (Logic Bug Fixed)
-	for _, seat := range req.Seats {
-		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
-		heldBy, err := s.redisClient.Get(ctx, lockKey).Result()
-		if err == redis.Nil {
-			return nil, fmt.Errorf("hold on seat %s has expired", seat)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to verify seat hold: %w", err)
-		}
-		if heldBy != userID {
-			return nil, fmt.Errorf("seat %s is held by another user", seat)
-		}
-	}
-
-	// ২. সিট ফেয়ার হিসাব করা (লঞ্চ/বাসের সিট ভিত্তিক ডাইনামিক ফেয়ার)
+	// 2. Total fare (per-seat fare from the inventory)
 	totalAmount, err := s.bookingRepo.GetSeatsFare(ctx, req.TripID, req.Seats)
 	if err != nil {
+		if errors.Is(err, repository.ErrSeatsUnavailable) {
+			return nil, fmt.Errorf("one or more seats are invalid for this trip")
+		}
 		return nil, fmt.Errorf("failed to fetch seat fares: %w", err)
 	}
 
 	bookingID := uuid.New().String()
-	pnrCode, err := generatePNR()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate PNR: %w", err)
-	}
 
 	booking := &domain.Booking{
 		ID:             bookingID,
 		UserID:         userID,
 		TripID:         req.TripID,
-		PNRCode:        pnrCode,
-		TotalAmount:    totalAmount,
 		DiscountAmount: 0.0,
+		TotalAmount:    totalAmount,
 		Status:         domain.BookingStatusConfirmed,
 	}
 
-	// ৩. টিকিট গঠন
-	var tickets []domain.Ticket
+	// 3. Build tickets
+	tickets := make([]domain.Ticket, 0, len(req.Passengers))
 	for _, p := range req.Passengers {
 		tktNum, err := generateTicketNumber(p.SeatNumber)
 		if err != nil {
@@ -136,7 +206,7 @@ func (s *bookingService) ConfirmBooking(
 		})
 	}
 
-	// ৪. পেমেন্ট রেকর্ড
+	// 4. Payment record
 	payment := &domain.Payment{
 		ID:               uuid.New().String(),
 		BookingID:        bookingID,
@@ -148,17 +218,40 @@ func (s *bookingService) ConfirmBooking(
 		Status:           domain.PaymentStatusSuccess,
 	}
 
-	// ৫. PostgreSQL ACID ট্রানজেকশনে ডাটাবেজে এক্সিকিউট করা
-	err = s.bookingRepo.CreateBookingWithSeats(ctx, booking, tickets, payment, req.Seats)
-	if err != nil {
-		return nil, fmt.Errorf("booking transaction failed: %w", err)
+	// 5. PostgreSQL ACID transaction (retry only if the generated PNR collides)
+	var txErr error
+	for attempt := 0; attempt < maxPNRAttempts; attempt++ {
+		pnr, err := generatePNR()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate PNR: %w", err)
+		}
+		booking.PNRCode = pnr
+
+		txErr = s.bookingRepo.CreateBookingWithSeats(ctx, booking, tickets, payment, req.Seats)
+		if errors.Is(txErr, repository.ErrDuplicatePNR) {
+			continue
+		}
+		break
+	}
+	if txErr != nil {
+		switch {
+		case errors.Is(txErr, repository.ErrSeatsUnavailable):
+			return nil, fmt.Errorf("one or more seats are already booked")
+		case errors.Is(txErr, repository.ErrDuplicateTransaction):
+			return nil, fmt.Errorf("this payment transaction has already been used")
+		case errors.Is(txErr, repository.ErrDuplicatePNR):
+			return nil, fmt.Errorf("could not generate a unique PNR, please try again")
+		}
+		return nil, fmt.Errorf("booking transaction failed: %w", txErr)
 	}
 
-	// ৬. বুকিং সফল হওয়ার পর Redis-এর টেম্পোরারি লক ক্লিয়ার করা
+	// 6. Booking succeeded: release the temporary Redis holds.
+	// Best effort, they expire on their own via TTL anyway.
+	keys := make([]string, 0, len(req.Seats))
 	for _, seat := range req.Seats {
-		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
-		s.redisClient.Del(ctx, lockKey)
+		keys = append(keys, seatHoldKey(req.TripID, seat))
 	}
+	s.redisClient.Del(ctx, keys...)
 
 	return &domain.ConfirmBookingResponse{
 		BookingID:      booking.ID,

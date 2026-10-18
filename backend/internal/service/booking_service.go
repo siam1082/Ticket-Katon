@@ -9,11 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"ticket-katon-backend/internal/domain"
-	"ticket-katon-backend/internal/repository"
-
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+	"ticket-katon-backend/internal/domain"
+	"ticket-katon-backend/internal/repository"
 )
 
 const (

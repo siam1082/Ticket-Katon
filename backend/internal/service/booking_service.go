@@ -22,34 +22,34 @@ type BookingService interface {
 
 type bookingService struct {
 	bookingRepo repository.BookingRepository
+	tripRepo    repository.TripRepository
 	redisClient *redis.Client
 }
 
 func NewBookingService(
 	bookingRepo repository.BookingRepository,
+	tripRepo repository.TripRepository,
 	redisClient *redis.Client,
 ) BookingService {
 	return &bookingService{
 		bookingRepo: bookingRepo,
+		tripRepo:    tripRepo,
 		redisClient: redisClient,
 	}
 }
 
-// ১২ অক্ষরের ক্রিপ্টোগ্রাফিক ইউনিক PNR (TK- + 8 Hex chars = 11-12 chars, high entropy)
-func generatePNR() (string, error) {
-	bytes := make([]byte, 5)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("TK-%s", strings.ToUpper(hex.EncodeToString(bytes))), nil
+// ১২ অক্ষরের ইউনিক ক্রিপ্টোগ্রাফিক PNR জেনারেটর
+func generatePNR() string {
+	bytes := make([]byte, 4)
+	rand.Read(bytes)
+	return fmt.Sprintf("TK-%s", strings.ToUpper(hex.EncodeToString(bytes)))
 }
 
-func generateTicketNumber(seatNumber string) (string, error) {
+// টিকিট নম্বর জেনারেটর
+func generateTicketNumber(seatNumber string) string {
 	bytes := make([]byte, 3)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(bytes))), nil
+	rand.Read(bytes)
+	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(bytes)))
 }
 
 func (s *bookingService) ConfirmBooking(
@@ -57,55 +57,33 @@ func (s *bookingService) ConfirmBooking(
 	userID string,
 	req *domain.ConfirmBookingRequest,
 ) (*domain.ConfirmBookingResponse, error) {
-	// ০. ইনপুট ইনভ্যালিডেশন
+	// ০. ইনপুট ইনভ্যালিডেশন: সিট সংখ্যা এবং প্যাসেঞ্জার সংখ্যা সমান কিনা যাচাই
 	if len(req.Seats) == 0 {
 		return nil, fmt.Errorf("at least one seat must be selected")
 	}
 	if len(req.Seats) != len(req.Passengers) {
-		return nil, fmt.Errorf("seat count (%d) and passenger count (%d) mismatch", len(req.Seats), len(req.Passengers))
+		return nil, fmt.Errorf("number of seats (%d) does not match passenger count (%d)", len(req.Seats), len(req.Passengers))
 	}
-
-	// সিট ভ্যালিডেশন: প্রতিটি প্যাসেঞ্জারের সিট সিলেক্টেড সিট লিস্টে আছে কিনা এবং ডুপ্লিকেট রোধ
-	seatMap := make(map[string]bool)
-	for _, seat := range req.Seats {
-		if seatMap[seat] {
-			return nil, fmt.Errorf("duplicate seat requested: %s", seat)
-		}
-		seatMap[seat] = true
-	}
-
-	for _, p := range req.Passengers {
-		if !seatMap[p.SeatNumber] {
-			return nil, fmt.Errorf("passenger assigned to unheld seat: %s", p.SeatNumber)
-		}
-	}
-
-	// ১. Redis Seat Hold Validation (Logic Bug Fixed)
+	// ১. Redis Seat Hold Validation: নিশ্চিত করা সিটগুলো এই ইউজারের দখলেই আছে
 	for _, seat := range req.Seats {
 		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
 		heldBy, err := s.redisClient.Get(ctx, lockKey).Result()
-		if err == redis.Nil {
-			return nil, fmt.Errorf("hold on seat %s has expired", seat)
-		}
-		if err != nil {
+		if err == redis.Nil || heldBy != userID {
+			return nil, fmt.Errorf("hold on seat %s has expired or is invalid", seat)
+		} else if err != nil {
 			return nil, fmt.Errorf("failed to verify seat hold: %w", err)
 		}
-		if heldBy != userID {
-			return nil, fmt.Errorf("seat %s is held by another user", seat)
-		}
 	}
 
-	// ২. সিট ফেয়ার হিসাব করা (লঞ্চ/বাসের সিট ভিত্তিক ডাইনামিক ফেয়ার)
-	totalAmount, err := s.bookingRepo.GetSeatsFare(ctx, req.TripID, req.Seats)
+	// ২. ট্রিপের ফেয়ার সংগ্রহ করে টোটাল ক্যালকুলেট করা
+	trip, err := s.tripRepo.GetTripByID(ctx, req.TripID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch seat fares: %w", err)
+		return nil, fmt.Errorf("trip details not found: %w", err)
 	}
 
+	totalAmount := trip.PricePerSeat * float64(len(req.Seats))
 	bookingID := uuid.New().String()
-	pnrCode, err := generatePNR()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate PNR: %w", err)
-	}
+	pnrCode := generatePNR()
 
 	booking := &domain.Booking{
 		ID:             bookingID,
@@ -114,16 +92,12 @@ func (s *bookingService) ConfirmBooking(
 		PNRCode:        pnrCode,
 		TotalAmount:    totalAmount,
 		DiscountAmount: 0.0,
-		Status:         domain.BookingStatusConfirmed,
+		Status:         domain.BookingConfirmed,
 	}
 
-	// ৩. টিকিট গঠন
+	// ৩. প্যাসেঞ্জার টিকিট স্ট্রাকচার রেডি করা
 	var tickets []domain.Ticket
 	for _, p := range req.Passengers {
-		tktNum, err := generateTicketNumber(p.SeatNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate ticket number: %w", err)
-		}
 		tickets = append(tickets, domain.Ticket{
 			ID:              uuid.New().String(),
 			BookingID:       bookingID,
@@ -131,12 +105,12 @@ func (s *bookingService) ConfirmBooking(
 			PassengerName:   p.Name,
 			PassengerPhone:  p.Phone,
 			PassengerGender: p.Gender,
-			TicketNumber:    tktNum,
+			TicketNumber:    generateTicketNumber(p.SeatNumber),
 			CreatedAt:       time.Now(),
 		})
 	}
 
-	// ৪. পেমেন্ট রেকর্ড
+	// ৪. পেমেন্ট রেকর্ড গঠন
 	payment := &domain.Payment{
 		ID:               uuid.New().String(),
 		BookingID:        bookingID,
@@ -145,7 +119,7 @@ func (s *bookingService) ConfirmBooking(
 		GatewayPaymentID: req.Payment.TransactionID,
 		Amount:           totalAmount,
 		Currency:         "BDT",
-		Status:           domain.PaymentStatusSuccess,
+		Status:           domain.PaymentSuccess,
 	}
 
 	// ৫. PostgreSQL ACID ট্রানজেকশনে ডাটাবেজে এক্সিকিউট করা
@@ -154,21 +128,20 @@ func (s *bookingService) ConfirmBooking(
 		return nil, fmt.Errorf("booking transaction failed: %w", err)
 	}
 
-	// ৬. বুকিং সফল হওয়ার পর Redis-এর টেম্পোরারি লক ক্লিয়ার করা
+	// ৬. বুকিং কনফার্ম হওয়ার পর Redis-এর টেম্পোরারি লক রিলিজ করা
 	for _, seat := range req.Seats {
 		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
 		s.redisClient.Del(ctx, lockKey)
 	}
 
 	return &domain.ConfirmBookingResponse{
-		BookingID:      booking.ID,
-		PNRCode:        booking.PNRCode,
-		TripID:         booking.TripID,
-		TotalAmount:    booking.TotalAmount,
-		DiscountAmount: booking.DiscountAmount,
-		Status:         booking.Status,
-		Tickets:        tickets,
-		PaymentStatus:  payment.Status,
+		BookingID:     booking.ID,
+		PNRCode:       booking.PNRCode,
+		TripID:        booking.TripID,
+		TotalAmount:   booking.TotalAmount,
+		Status:        booking.Status,
+		Tickets:       tickets,
+		PaymentStatus: payment.Status,
 	}, nil
 }
 

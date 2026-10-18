@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 
+	"ticket-katon-backend/internal/middleware"
+	"ticket-katon-backend/internal/pkg/token"
 	"ticket-katon-backend/internal/service"
 )
 
@@ -37,13 +39,15 @@ type ReleaseSeatsRequest struct {
 
 // Hold handles POST /api/v1/seats/hold
 func (h *SeatLockHandler) Hold(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value("user_id").(string)
-	if !ok || userID == "" {
+	claims, ok := r.Context().Value(middleware.UserClaimsKey).(*token.CustomClaims)
+	if !ok || claims == nil || claims.UserID == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 		return
 	}
+
+	userID := claims.UserID
 
 	var req HoldSeatsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -88,13 +92,15 @@ func (h *SeatLockHandler) Hold(w http.ResponseWriter, r *http.Request) {
 
 // Release handles POST /api/v1/seats/release
 func (h *SeatLockHandler) Release(w http.ResponseWriter, r *http.Request) {
-	userID, ok := r.Context().Value("user_id").(string)
-	if !ok || userID == "" {
+	claims, ok := r.Context().Value(middleware.UserClaimsKey).(*token.CustomClaims)
+	if !ok || claims == nil || claims.UserID == "" {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 		return
 	}
+
+	userID := claims.UserID
 
 	var req ReleaseSeatsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

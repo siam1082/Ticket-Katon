@@ -1,80 +1,317 @@
-================================================================================
-                    TICKET-KATON: FULL PROJECT ROADMAP & STEPS
-================================================================================
+TICKET-KATON — ACADEMIC DEMO PROJECT STATUS & WORKFLOW
+======================================================
 
-1. PROJECT OVERVIEW & ARCHITECTURE
---------------------------------------------------------------------------------
-- Purpose: High-concurrency ticket booking engine for Bus and Launch transport in Bangladesh.
-- Backend Tech Stack: Go (Golang) - high throughput, goroutine-based concurrency.
-- Primary Database: PostgreSQL (Supabase Connection Pooler) - relational data, ACID transactions.
-- Fast Cache & Locks: Redis (Upstash) - seat hold lock, distributed TTL, rate limiting.
-- Frontend Tech Stack: React / Next.js, Tailwind CSS, real-time seat countdown timer.
+এই project-এর লক্ষ্য শিক্ষক/পরীক্ষকের সামনে একটি complete, polished ও
+চালিয়ে দেখানো যায় এমন academic prototype উপস্থাপন করা। এটি real ticket-selling
+business বা production service নয়। Real operator contract, trade license,
+bKash/Nagad merchant account বা live payment integration এই project-এর scope
+নয়। Operator, route, schedule, seat, fare ও payment সব demo/simulated হবে।
 
-
-2. POSTGRESQL DATABASE ENTITIES (SUMMARY)
---------------------------------------------------------------------------------
-- users: Store accounts (Roles: CUSTOMER, OPERATOR_ADMIN, SUPER_ADMIN).
-- operators & vehicles: Bus/launch companies and vehicles with JSONB layout configs.
-- routes & trips: Departure/destination cities, timetable, pricing, trip status.
-- trip_seat_inventory: Live seat status tracking (AVAILABLE, HELD, BOOKED).
-- bookings & tickets: Unique PNR code, booking records, passenger info, and seats.
-- payments: Payment gateway records, status (INITIATED, SUCCESS, FAILED).
+এই নথি repo-র source code দেখে লেখা। “আছে” মানে source-এ implementation
+আছে; end-to-end demo হিসেবে কাজ করে—তা আলাদা করে যাচাই না করলে ধরে নেওয়া যাবে না।
 
 
-3. STEP-BY-STEP IMPLEMENTATION ROADMAP
---------------------------------------------------------------------------------
+1. PROJECT-টি কী
+---------------
+Ticket-Katon বাংলাদেশে Bus, Train ও Launch যাত্রার booking workflow-কে
+দেখানোর academic web prototype। শিক্ষককে search থেকে demo ticket পাওয়া পর্যন্ত
+সম্পূর্ণ flow দেখানোই মূল লক্ষ্য।
 
-[COMPLETED] STEP 1: CLOUD DATA LAYER & ENVIRONMENT SETUP
-- Supabase PostgreSQL setup and database pooler connection verified.
-- Upstash Redis instance connected and ping-tested via Go.
-- Database schema migration executed and demo trips/seats seeded.
-- Git repository initialized with root level .gitignore.
+বর্তমান প্রযুক্তি:
+- Frontend: React + Vite, React Router, Axios, lucide-react, CSS।
+- Backend: Go + chi HTTP router।
+- Data/cache সংযোগের code: PostgreSQL/pgxpool এবং Redis।
+- Auth-এর code: bcrypt password hash ও JWT।
 
-STEP 2: BACKEND PROJECT STRUCTURE & REPOSITORY PATTERN
-- Setup standard Go project layout:
-  * cmd/api/main.go (entry point)
-  * internal/config (environment loader)
-  * internal/database (pgxpool & redis client singletons)
-  * internal/domain (data models & structs)
-  * internal/repository (raw SQL queries & DB operations)
-  * internal/service (business logic)
-  * internal/handler (HTTP controllers & routing)
-- Implement clean dependency injection and structured JSON logger.
+সীমা: repository-তে Next.js বা Tailwind configuration নেই। Project-টি React +
+Vite frontend ও Go backend। Production/cloud deployment এই academic demo-র
+acceptance requirement নয়; local demo setup থাকলেই presentation-এর জন্য যথেষ্ট।
 
-STEP 3: AUTHENTICATION & ACCESS CONTROL (RBAC)
-- User signup and login handlers with Bcrypt password hashing.
-- JWT token generator and validation middleware.
-- Role-based middleware guards (CustomerAuth, AdminOnly).
-- User profile endpoint.
 
-STEP 4: SEARCH & REAL-TIME SEAT INVENTORY API
-- Public search API: origin_city, destination_city, and travel date filter.
-- Dynamic seat layout projection API for specific trip (Bus/Launch layout JSON).
-- Return seat statuses (AVAILABLE, HELD, BOOKED) with exact pricing.
+2. এখন পর্যন্ত যা করা হয়েছে
+---------------------------
+[CODE আছে — কিন্তু end-to-end demo সম্পূর্ণ নয়]
+- Go API entry point, chi router, request ID/real IP/logging/recovery/timeout
+  middleware এবং graceful shutdown।
+- PostgreSQL pool ও Redis client তৈরির code।
+- User, trip/seat, booking, ticket, payment-সংক্রান্ত domain model।
+- Register/login/profile handler ও service; bcrypt password hashing এবং JWT।
+- JWT auth middleware ও role-based middleware।
+- Trip search এবং trip seat-layout-এর repository/service/HTTP handler।
+- Redis Lua script দিয়ে একাধিক seat atomic hold করা; hold-এর মেয়াদ 5 মিনিট;
+  user-owned hold release করার code।
+- Counter/admin endpoints এবং admin UI-র skeleton.
+- React app-এ Home, Login, Register, Profile, AdminDashboard page; navbar,
+  auth context, shared Axios client এবং CSS.
+- SearchResults component-ও আছে, কিন্তু App routing-এ route হিসেবে যোগ হয়নি।
 
-STEP 5: HIGH-CONCURRENCY SEAT LOCKING ENGINE (REDIS)
-- Critical concurrency engine to prevent race conditions during high demand.
-- Redis Atomic operation (SETNX / Lua Script) to hold seats for a user.
-- 7 minutes (420 seconds) TTL lock per seat.
-- Background worker / database reconciliation to release expired holds.
+[যাচাই করা ফল]
+- Backend module-এ `go test ./...` compile/test command সফল হয়েছিল।
+- Frontend-এ `npm run build` সফল হয়েছিল।
+- Backend/frontend-এ বর্তমানে application-specific test file পাওয়া যায়নি;
+  তাই এই ফলাফল compile/build যাচাই, feature correctness বা integration test নয়।
+- Booking service-এর compile error এবং Vite-এ অনুপস্থিত CSS import-গুলো ঠিক
+  করা হয়েছে; সংশ্লিষ্ট Go test ও frontend build pass করেছে।
 
-STEP 6: BOOKING CONFIRMATION & PAYMENT WORKFLOW
-- ACID Transaction in PostgreSQL:
-  * Validate active seat lock.
-  * Update trip_seat_inventory status to BOOKED.
-  * Create booking record with 12-char cryptographic PNR code.
-  * Insert individual tickets for passengers.
-- Payment gateway integration / webhook simulation (bKash, Nagad, SSLCommerz).
 
-STEP 7: FRONTEND APPLICATION (USER INTERACTION)
-- Landing page with transport type toggle (Bus vs Launch) and search bar.
-- Interactive seat selection grid (visual seat layout, cabin vs deck selection).
-- 7-minute real-time reverse countdown timer on seat hold.
-- Passenger details form and booking confirmation screen with printable ticket.
+3. এখনকার অবস্থা ও প্রথমে যেগুলো ঠিক করতে হবে
+---------------------------------------------
+- `backend/migrations/000001_init.sql` ও `backend/scripts/seed.sql` বর্তমানে
+  0 byte। Database schema/seed repo থেকে পুনরায় তৈরি করা যাবে—এমন প্রমাণ নেই।
+- Booking service/repository code আছে, কিন্তু `main.go`-তে booking service বা
+  handler/router wire করা নেই। Booking confirm, user bookings বা PNR API নেই।
+- Seat hold Redis key format এক নয়: seat-lock service `lock:trip:...` ব্যবহার
+  করে; booking service-এ থাকা code `seat_hold:...` key খোঁজে। Booking flow
+  wire করার আগে একই key/helper ও expiry policy ব্যবহার করতে হবে।
+- Payment record-এর model/repository code আছে; end-to-end demo payment flow
+  নেই। Real payment gateway এই project-এর scope নয়।
+- Admin schedule/ticket endpoints এখন placeholder JSON ফেরায়; database-এ
+  schedule বা counter ticket persist করে না।
+- Home search form এখন শুধু alert দেখায়; API request/search-results navigation
+  করে না। SearchResults page backend-এর route/query/response contract-এর
+  সঙ্গে পুরোপুরি মেলে না।
+- Frontend register `name` পাঠায়; backend register `full_name` আশা করে।
+  Frontend admin login `/admin/auth/login` ব্যবহার করে; backend-এ এই route নেই।
+- Profile page `/bookings/my` চায়; backend-এ booking list route নেই।
+- UI-তে 12K+, 3.4K, 100%-এর মতো hard-coded statistic এবং “official /
+  government-backed” দাবি আছে। Academic demo-তে এগুলো fictional/demo data
+  হিসেবে চিহ্নিত করতে হবে; real operator বা সরকারি অনুমোদনের দাবি করা যাবে না।
+- Transport-এর domain type-এ Train আছে, কিন্তু কার্যকর search/booking,
+  database schema/seed, train-specific schedule/coach/seat map প্রমাণিত নয়।
+- Auth register request-এ role গ্রহণ করা হয়; public user যেন নিজের role
+  Operator Admin/Super Admin করতে না পারে—এটি backend-এ নিশ্চিত করতে হবে।
+- `.env`/secret নিরাপদে ignore/rotate হয়েছে কি না আলাদা করে যাচাই করতে হবে;
+  কোনো secret Git-এ commit করা যাবে না।
 
-STEP 8: RATE LIMITING, DOCKER & CLOUD DEPLOYMENT
-- IP-based token bucket rate limiter middleware to mitigate bot scraping/DDoS.
-- Dockerfile and docker-compose configuration.
-- Production environment variables setup and deployment to cloud container service.
+NEXT STEP: নিচের STEP 1 থেকে ক্রমানুসারে কাজ শুরু করো। আগের step-এর
+“শেষ হয়েছে বুঝবে যখন” শর্ত পূরণ না হলে পরের step-এ যেও না।
 
-================================================================================
+
+4. কাজের পূর্ণ user workflow — লক্ষ্য অবস্থা
+-------------------------------------------
+1) Visitor Home খুলে Bus / Train / Launch নির্বাচন করবে; site-এ academic
+   demo/prototype disclaimer দেখা যাবে।
+2) From, To ও Journey Date দিয়ে search করবে।
+3) Search result-এ demo operator, vehicle/train/launch, departure/arrival,
+   fare, available seat ও পরিষ্কার service image/illustration দেখবে।
+4) Trip বেছে উপযুক্ত seat map-এ available seat নির্বাচন করবে।
+5) Demo account দিয়ে Login/Register করবে; OTP/2FA flow implement করলে
+   development/demo mode-এ verification দেখাবে, কোনো real SMS/email প্রয়োজন নেই।
+6) Backend Redis-এ সব seat atomically hold করবে; UI-তে সঠিক expiry countdown
+   দেখাবে। Hold ব্যর্থ/মেয়াদ শেষ হলে user-কে জানাবে।
+7) Passenger details পূরণ করে fare/fees/total যাচাই করবে।
+8) “Demo payment” simulator-এ success/fail নির্বাচন করবে; backend-এ payment
+   result validate করে booking, tickets, payment status ও seat status persist
+   হবে। কোনো real টাকা কাটা হবে না।
+9) Confirmation page এবং profile/booking history-তে PNR ও ticket card দেখাবে।
+10) User ticket print/download/share করতে পারবে; cancellation/refund policy
+    থাকলে সেই নিয়মে request করতে পারবে।
+11) Demo admin account trip, seat inventory, booking ও report পরিচালনা করবে;
+    demo customer কখনো admin capability পাবে না।
+
+
+5. বাকি কাজ — ধারাবাহিকভাবে করার checklist
+------------------------------------------
+
+STEP 1 — DEMO SCOPE, DISCLAIMER ও API CONTRACT
+- Project-টিকে academic prototype হিসেবে পরিচয় করাও; real ticket service,
+  real operator partnership বা government affiliation দাবি কোরো না।
+- Fictional operator ও statistics demo বলে label করো; unsupported “official”,
+  “government-backed”, “100% verified” লেখা সরাও।
+- Home/footer-এ স্পষ্ট disclaimer যোগ করো:
+  “Ticket-Katon একটি academic demo/prototype। Operator, schedule, seat ও fare
+  তথ্য কাল্পনিক/demo। Payment simulator-এ কোনো real টাকা লেনদেন হয় না।
+  এই সাইট দিয়ে real ticket কেনা বা ভ্রমণ নিশ্চিত করা যায় না।”
+- Presentation-এর জন্য local run instructions, seeded demo account, sample
+  search route এবং demo scenario প্রস্তুত করো। Real secret/credential
+  repository-তে রেখো না।
+- API contract (URL, JSON field, auth, error response) frontend/backend
+  একসঙ্গে ঠিক করো; `name`/`full_name`, admin login, search params, response
+  envelope, booking endpoints-এর mismatch ঠিক করো।
+- Go/React lint, unit test, integration test ও build-এর baseline রাখো; local
+  presentation-এর জন্য reproducible run instructions/config যোগ করো।
+
+শেষ হয়েছে বুঝবে যখন: Home/Footer-এ disclaimer দেখা যায়, UI-তে fake official
+claim নেই, API field/path লিখিতভাবে এক, এবং clean local setup চালানোর নির্দেশনা
+আছে।
+
+STEP 2 — DATABASE SCHEMA ও DEMO SEED
+- `000001_init.sql`-এ demo-র প্রয়োজনীয় users, operators, vehicles,
+  routes, trips, trip_seat_inventory, bookings, tickets, payments,
+  demo OTP/2FA ও audit data-এর migration লেখো; production infrastructure
+  যোগ করার প্রয়োজন নেই।
+- Foreign key, unique constraint (PNR/ticket/transaction), status constraint,
+  money type, timezone, index এবং migration-up/down পরিকল্পনা যোগ করো।
+- Empty seed file পূরণ করে fictional/demo-labelled Bus, Train ও Launch,
+  route, schedule, seat layout, fare এবং presentation account যোগ করো।
+- Seed rerunnable/idempotent করো; fictional data যেন UI-তেও demo হিসেবে চেনা যায়।
+- Schema migration ও seed local disposable database-এ চালিয়ে যাচাই করো।
+- Database না থাকলে app কীভাবে fail হবে, health/readiness endpoint কী দেখাবে
+  তা নির্ধারণ করো।
+
+শেষ হয়েছে বুঝবে যখন: ফাঁকা local database-এ migration ও seed চালিয়ে Bus,
+Train, Launch-এর fictional trip/seat data তৈরি হয় এবং app তা query করতে পারে।
+
+STEP 3 — AUTH, DEMO ACCOUNT ও ROLE SECURITY
+- Public registration-এ role field গ্রহণ/বিশ্বাস না করে server-side CUSTOMER
+  নির্ধারণ করো। Presentation-এর জন্য আলাদা seeded fictional admin account দাও।
+- Password/name/email/phone validation, request size limit, uniform error,
+  duplicate account ও password policy যোগ করো।
+- Frontend/backend auth JSON ও route এক করো; login response-এ নিরাপদ user
+  fields-ই পাঠাও; UI role check-এর পাশাপাশি server RBAC বাধ্যতামূলক রাখো।
+- Academic demo-র জন্য simulated OTP screen/code flow implement করো; real
+  email/SMS provider বা paid account লাগবে না। Development-only OTP UI-তে
+  স্পষ্টভাবে দেখাও, production credential হিসেবে ব্যবহার কোরো না।
+- Requirement-এ 2FA থাকলে demo TOTP/mock challenge, enrollment, verification
+  ও recovery-code example দেখাও; real SMS/email delivery দরকার নেই।
+- Demo-তেও JWT expiry, customer/admin authorization, registration-এ role
+  escalation প্রতিরোধ এবং login brute-force-এর basic protection রাখো।
+- Auth/RBAC/demo OTP/2FA edge case-এর automated tests যোগ করো।
+
+শেষ হয়েছে বুঝবে যখন: seeded demo customer/admin দিয়ে login হয়, registration
+customer role-এই থাকে, protected route server-এ role যাচাই করে, এবং প্রয়োজনীয়
+demo OTP/2FA flow provider ছাড়াই প্রদর্শন করা যায়।
+
+STEP 4 — UI REDESIGN ও TRANSPORT VISUAL
+- বর্তমান UI-কে prototype হিসেবে ধরে consistent design system বানাও:
+  typography, color, spacing, button/form, card, error/loading/empty state।
+- Home-এ পরিষ্কার hero/search layout, mobile responsive navigation, accessible
+  labels/focus/contrast এবং API search-এর জন্য প্রস্তুত form দাও; API wiring
+  STEP 5-এ হবে।
+- Bus/Train/Launch আলাদা visual scenario:
+  * Bus: সামনের দিক/driver indicator, aisle-সহ 2x2/2x1 coach grid, প্রয়োজনে
+    AC/non-AC/sleeper layout।
+  * Train: coach selector, coach/class (যেমন Shovon/Snigdha/Cabin) ও
+    seat/berth map; train-এর বাস্তব বিন্যাসের সঙ্গে মেলে এমন UI।
+  * Launch: deck/cabin বিভাগ, single/double/VIP cabin এবং deck seat আলাদা
+    করে দেখাও; বুকিংয়ের নিয়মও স্পষ্ট করো।
+- Seat legend: Available, Selected, Held, Booked; প্রত্যেকটির রং ছাড়াও icon/
+  text থাকবে। Held/Booked seat select করা যাবে না; server state-ই চূড়ান্ত।
+- প্রতিটি transport type-এর জন্য relevant self-created, open-license বা
+  presentation-use উপযোগী image/illustration যোগ করো; প্রয়োজনে “Illustrative
+  image — demo only” label দাও। Fictional operator/vehicle-কে real বলে দেখিও না।
+- User চাওয়া ticket card-এ PNR, operator, transport/coach, route, journey
+  date/time, passenger, seat, fare/fees/total, payment state ও booking state
+  রাখো। Print-friendly view; PDF/QR verification পরে নিরাপদভাবে যোগ করো।
+- Dashboard/Profile-এর card hierarchy, font, alignment, whitespace, responsive
+  mobile behavior এবং consistent empty/error/loading UI ঠিক করো।
+- Hard-coded stats সরিয়ে backend data না থাকলে stats section লুকাও বা “Demo”
+  হিসেবে চিহ্নিত করো।
+- Usability review: mobile width, keyboard-only, contrast, long names/route,
+  বাংলা/ইংরেজি text overflow পরীক্ষা করো।
+
+শেষ হয়েছে বুঝবে যখন: mobile/desktop-এ consistent, polished UI; Bus/Train/
+Launch-এর আলাদা illustrative hero ও seat-map direction; disclaimer ও loading,
+empty, error state দৃশ্যমান।
+
+STEP 5 — SEARCH ও SEARCH RESULT
+- Backend search API এবং frontend search form/result page-এর field/URL/response
+  contract এক করো; Home থেকে SearchResults-এ real navigation করো।
+- Search filters, date validation, empty/error/loading/retry এবং pagination/
+  সীমিত result strategy বাস্তবায়ন করো।
+- Demo trip/seat data API/database থেকে দেখাও—শুধু UI-তে hard-coded fake seat
+  availability নয়। Bus, Train ও Launch-এ presentation-ready sample trip রাখো।
+- Vehicle/train/launch layout config-এর schema ও validation সংজ্ঞায়িত করো।
+
+শেষ হয়েছে বুঝবে যখন: Home-এ search দিলে API থেকে trip আসে; result card থেকে
+নির্বাচিত trip/seat page-এ যাওয়া যায়; no result ও API error সুন্দরভাবে দেখায়।
+এই step-এ admin schedule CRUD না হলেও চলবে; সেটি STEP 9-এ।
+
+STEP 6 — BUS/TRAIN/LAUNCH SEAT SELECT ও HOLD
+- Seat-lock service-এর key/TTL এক জায়গায় সংজ্ঞায়িত করে UI response-এ
+  authoritative expiry ফেরাও; booking-এও পরে একই helper ব্যবহার হবে।
+- Request duplicate seat, wrong trip, unknown seat, expired hold ও concurrent
+  conflict validate করো।
+- Booking page-এ যাওয়ার আগে hold ownership/expiry server-side যাচাই করো;
+  timer শেষ বা user cancel করলে seat release করো।
+
+শেষ হয়েছে বুঝবে যখন: তিন transport-এর demo layout data অনুযায়ী render হয়,
+seat status ও 5-minute hold server/Redis থেকে আসে, timer শেষ হলে seat ছাড়ে,
+এক seat দুই demo user একসঙ্গে hold করতে পারে না।
+
+STEP 7 — BOOKING CONFIRMATION ও TICKET CARD
+- Passenger details, booking summary, fare breakdown এবং validation UI যোগ করো।
+- Payment-এর আগে pending booking তৈরি ও payment session/result-এর সঙ্গে যুক্ত
+  করার API wire করো; paid না হওয়া পর্যন্ত confirmed ticket দেখিও না।
+- Booking service/handler/router wire করে booking confirm, PNR lookup,
+  নিজের booking list/detail API যোগ করো।
+- Client fare বিশ্বাস কোরো না; seat inventory ও booking consistency DB
+  transaction-এ enforce করো। Booking/ticket/payment record atomically save
+  করো; failure-এ rollback ও duplicate request-এ idempotency রাখো।
+- Payment success হলে seat BOOKED করো এবং hold lock release করো; failure/
+  cancel/expiry হলে seat release ও status-টি সঠিকভাবে সংরক্ষণ করো।
+- Demo ticket card-এ PNR, fictional operator, route, date/time, passenger,
+  seat, fare, booking/payment status দেখাও; print stylesheet যোগ করো।
+- Duplicate submit, expired hold ও DB transaction failure-এ ভুল confirmation
+  না দেখিয়ে পরিষ্কার error দেখাও.
+- Booking confirmation page ও profile history-তে ticket দেখাও।
+
+শেষ হয়েছে বুঝবে যখন: hold করা seat দিয়ে pending booking তৈরি হয়; mock payment
+success-এর পর confirmation/PNR/ticket দেখা যায় এবং profile-এ booking পাওয়া যায়।
+
+STEP 8 — MOCK PAYMENT SIMULATOR [real gateway নয়]
+- bKash/Nagad/SSLCommerz-এর নাম UI-তে দেখালে “Simulation / Demo only” label
+  দাও; real gateway আছে বা real টাকা নেওয়া হচ্ছে—এমন দাবি কোরো না।
+- Mock payment page/API বানাও, যেখানে presentation-এ success, failure ও
+  cancel scenario চালানো যাবে; কোনো real টাকা transfer হবে না।
+- Amount, currency ও booking reference backend তৈরি/যাচাই করবে; client-এর
+  পাঠানো paid status বিশ্বাস করা যাবে না।
+- Demo initiate/status API, pending/success/failed/cancelled state transition,
+  duplicate request-এ idempotency এবং booking confirmation-এর সঙ্গে সংযোগ দাও।
+- UI/API-তে mock result-কে স্পষ্ট demo হিসেবে দেখাও। Merchant account, live
+  webhook credential বা provider onboarding লাগবে না।
+
+শেষ হয়েছে বুঝবে যখন: presentation-এ success, failure, cancel তিনটি path দেখানো
+যায়; শুধু verified mock-success-এ booking confirm হয়; real টাকা নড়ে না।
+
+STEP 9 — DEMO ADMIN WORKFLOW
+- Fictional operator admin ও demo super admin role/scope আলাদা করো; demo-তেও
+  permission server-এ enforce করো।
+- Counter ticket placeholder-এর বদলে demo booking/receipt + seat inventory।
+- Schedule/vehicle/seat fare, trip status, cancellation, sales report এবং
+  audit log-এর CRUD/validation।
+- Presentation-এর জন্য PNR search, booking/payment status এবং admin action
+  history দেখাও। Ticket resend/refund বাস্তবায়ন করা বাধ্যতামূলক নয়।
+
+শেষ হয়েছে বুঝবে যখন: admin demo trip/seat/fare update করতে পারে, counter demo
+ticket issue হয়, customer/admin permission আলাদা থাকে।
+
+STEP 10 — TEST, REHEARSAL ও TEACHER PRESENTATION
+- Go unit tests: auth, role authorization, fare, booking validation,
+  PNR/ticket generation, transaction failures, Redis hold/release/expiry।
+- PostgreSQL/Redis integration tests: parallel seat booking, duplicate
+  requests, rollback, expired hold, failed mock payment।
+- Frontend component/API tests এবং E2E: search → seat → hold → passenger →
+  payment → ticket; mobile + admin role flow।
+- Demo scope অনুযায়ী concurrency test দিয়ে double booking ঠেকানো এবং database/
+  Redis failure-এ app-এর আচরণ যাচাই করো; production-scale load target আবশ্যক নয়।
+- Logs, health/readiness ও local error diagnostics এমন রাখো যাতে presentation-
+  এর সময় failure debug করা যায়।
+- Optional Docker Compose বা এক ধাপের local run script দিয়ে instructor-এর
+  machine-এ demo চালানোর নির্দেশনা দাও।
+- Teacher presentation-এর আগে clean setup-এ migration/seed, backend, frontend,
+  demo login, search-to-ticket flow এবং success/failure payment scenario
+  একবার সম্পূর্ণ rehearsal করো।
+
+শেষ হয়েছে বুঝবে যখন: fresh clone/setup থেকে documented command দিয়ে app চলে,
+মূল end-to-end test pass করে, আর নিচের presentation checklist-এর সব box tick।
+
+
+6. FINAL PRESENTATION CHECKLIST
+-------------------------------
+[ ] Migration ও demo seed fresh local setup-এ চালানো যায়।
+[ ] Search UI backend API-র সঙ্গে কাজ করে; Bus/Train/Launch-এ sample data আছে।
+[ ] Seat layout/state backend-নির্ভর; concurrent booking-এ double booking নেই।
+[ ] Booking, mock payment success/failure, ticket card end-to-end demo হয়।
+[ ] Demo login/role/OTP/2FA flow scope অনুযায়ী কাজ করে; customer admin নয়।
+[ ] Disclaimer দৃশ্যমান; operator, schedule, fare ও payment demo বলে বোঝা যায়।
+[ ] Automated tests/build pass; teacher-এর সামনে clean local run rehearsal হয়েছে।
+[ ] Project limitation ও ভবিষ্যৎ production work presentation-এ আলাদা করে বলা হয়।
+
+Status update করার নিয়ম:
+- [DONE + evidence] শুধু code এবং প্রাসঙ্গিক test/runtime verification থাকলে।
+- [PARTIAL] skeleton/handler/model আছে কিন্তু end-to-end কাজ করে না।
+- [TODO] implementation বা verification বাকি।
+- Real provider account, operator contract, trade license, production deploy
+  এই academic presentation scope-এর বাইরে; এগুলো সম্পন্ন না হওয়া project-এর
+  demo acceptance আটকাবে না।

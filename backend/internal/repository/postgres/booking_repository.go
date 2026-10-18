@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
@@ -19,16 +21,35 @@ func NewBookingRepository(db *pgxpool.Pool) repository.BookingRepository {
 	return &bookingRepository{db: db}
 }
 
+// mapUniqueViolation converts Postgres unique-violation errors (code 23505)
+// into repository sentinel errors. Returns nil if err is not one we care about.
+func mapUniqueViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		name := strings.ToLower(pgErr.ConstraintName)
+		switch {
+		case strings.Contains(name, "pnr"):
+			return repository.ErrDuplicatePNR
+		case strings.Contains(name, "transaction"):
+			return repository.ErrDuplicateTransaction
+		}
+	}
+	return nil
+}
+
 func (r *bookingRepository) GetSeatsFare(ctx context.Context, tripID string, seatNumbers []string) (float64, error) {
 	query := `
-		SELECT COALESCE(SUM(fare), 0)
+		SELECT COALESCE(SUM(fare), 0), COUNT(*)
 		FROM trip_seat_inventory
 		WHERE trip_id = $1 AND seat_number = ANY($2)
 	`
 	var totalFare float64
-	err := r.db.QueryRow(ctx, query, tripID, seatNumbers).Scan(&totalFare)
-	if err != nil {
+	var found int
+	if err := r.db.QueryRow(ctx, query, tripID, seatNumbers).Scan(&totalFare, &found); err != nil {
 		return 0, fmt.Errorf("failed to calculate seats fare: %w", err)
+	}
+	if found != len(seatNumbers) {
+		return 0, repository.ErrSeatsUnavailable
 	}
 	return totalFare, nil
 }
@@ -46,7 +67,7 @@ func (r *bookingRepository) CreateBookingWithSeats(
 	}
 	defer tx.Rollback(ctx)
 
-	// ১. সিট ইনভেন্টরি আপডেট: নির্বাচিত সিটগুলোকে BOOKED করা
+	// 1. Mark the selected seats as BOOKED (only if not already booked)
 	updateSeatQuery := `
 		UPDATE trip_seat_inventory
 		SET status = 'BOOKED', updated_at = NOW()
@@ -57,10 +78,10 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		return fmt.Errorf("failed to update seat inventory: %w", err)
 	}
 	if int(tag.RowsAffected()) != len(seatNumbers) {
-		return fmt.Errorf("one or more seats are already booked or invalid")
+		return repository.ErrSeatsUnavailable
 	}
 
-	// ২. Bookings টেবিলে বুকিং ডাটা ইনসার্ট করা
+	// 2. Insert booking
 	bookingQuery := `
 		INSERT INTO bookings (id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
@@ -77,10 +98,13 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		string(booking.Status),
 	)
 	if err != nil {
+		if mapped := mapUniqueViolation(err); mapped != nil {
+			return mapped
+		}
 		return fmt.Errorf("failed to insert booking: %w", err)
 	}
 
-	// ৩. Tickets টেবিলে টিকিটের তথ্য ইনসার্ট করা
+	// 3. Insert tickets
 	ticketQuery := `
 		INSERT INTO tickets (id, booking_id, seat_number, passenger_name, passenger_phone, passenger_gender, ticket_number, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
@@ -102,7 +126,7 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		}
 	}
 
-	// ৪. Payments টেবিলে পেমেন্ট রেকর্ড ইনসার্ট করা
+	// 4. Insert payment record
 	paymentQuery := `
 		INSERT INTO payments (id, booking_id, gateway, transaction_id, gateway_payment_id, amount, currency, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
@@ -120,6 +144,9 @@ func (r *bookingRepository) CreateBookingWithSeats(
 		string(payment.Status),
 	)
 	if err != nil {
+		if mapped := mapUniqueViolation(err); mapped != nil {
+			return mapped
+		}
 		return fmt.Errorf("failed to insert payment record: %w", err)
 	}
 
@@ -191,6 +218,7 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 
 	return booking, tickets, nil
 }
+
 func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID string) ([]domain.Booking, error) {
 	query := `
 		SELECT id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at

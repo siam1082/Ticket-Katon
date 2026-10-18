@@ -178,7 +178,7 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil, fmt.Errorf("booking not found")
+			return nil, nil, domain.NewBookingError(domain.ErrBookingNotFound, "booking not found")
 		}
 		return nil, nil, fmt.Errorf("database query error: %w", err)
 	}

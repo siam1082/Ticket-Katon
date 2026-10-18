@@ -190,10 +190,6 @@ func (s *bookingService) ConfirmBooking(
 	// 3. Build tickets
 	tickets := make([]domain.Ticket, 0, len(req.Passengers))
 	for _, p := range req.Passengers {
-		tktNum, err := generateTicketNumber(p.SeatNumber)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate ticket number: %w", err)
-		}
 		tickets = append(tickets, domain.Ticket{
 			ID:              uuid.New().String(),
 			BookingID:       bookingID,
@@ -201,7 +197,7 @@ func (s *bookingService) ConfirmBooking(
 			PassengerName:   p.Name,
 			PassengerPhone:  p.Phone,
 			PassengerGender: p.Gender,
-			TicketNumber:    tktNum,
+			TicketNumber:    generateTicketNumber(p.SeatNumber),
 			CreatedAt:       time.Now(),
 		})
 	}
@@ -254,14 +250,13 @@ func (s *bookingService) ConfirmBooking(
 	s.redisClient.Del(ctx, keys...)
 
 	return &domain.ConfirmBookingResponse{
-		BookingID:      booking.ID,
-		PNRCode:        booking.PNRCode,
-		TripID:         booking.TripID,
-		TotalAmount:    booking.TotalAmount,
-		DiscountAmount: booking.DiscountAmount,
-		Status:         booking.Status,
-		Tickets:        tickets,
-		PaymentStatus:  payment.Status,
+		BookingID:     booking.ID,
+		PNRCode:       booking.PNRCode,
+		TripID:        booking.TripID,
+		TotalAmount:   booking.TotalAmount,
+		Status:        booking.Status,
+		Tickets:       tickets,
+		PaymentStatus: payment.Status,
 	}, nil
 }
 

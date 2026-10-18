@@ -51,6 +51,8 @@ func main() {
 	authSvc := service.NewAuthService(userRepo, tokenMaker)
 	tripSvc := service.NewTripService(tripRepo)
 	seatLockSvc := service.NewSeatLockService(redisClient)
+	bookingRepo := postgres.NewBookingRepository(pgPool)
+	bookingSvc := service.NewBookingService(bookingRepo, redisClient)
 
 	// 4. Handlers
 	healthHdl := httpHandler.NewHealthHandler(healthSvc)
@@ -58,6 +60,7 @@ func main() {
 	tripHdl := httpHandler.NewTripHandler(tripSvc)
 	seatLockHdl := httpHandler.NewSeatLockHandler(seatLockSvc)
 	adminHdl := httpHandler.NewAdminHandler()
+	bookingHdl := httpHandler.NewBookingHandler(bookingSvc)
 
 	// 5. Router Setup
 	r := chi.NewRouter()
@@ -94,6 +97,14 @@ func main() {
 			seats.Use(middleware.AuthMiddleware(tokenMaker))
 			seats.Post("/hold", seatLockHdl.Hold)
 			seats.Post("/release", seatLockHdl.Release)
+		})
+
+		// Booking Routes (Protected with JWT)
+		api.Route("/bookings", func(b chi.Router) {
+			b.Use(middleware.AuthMiddleware(tokenMaker))
+			b.Post("/confirm", bookingHdl.Confirm)
+			b.Get("/my", bookingHdl.MyBookings)
+			b.Get("/{pnr}", bookingHdl.GetByPNR)
 		})
 
 		// Admin & Counter Sales Routes (Protected with JWT & RBAC)

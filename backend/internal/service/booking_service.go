@@ -66,8 +66,9 @@ func generateTicketNumber(seatNumber string) (string, error) {
 	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(b))), nil
 }
 
+// seatHoldKey must match the key written by SeatLockService (see formatSeatKey).
 func seatHoldKey(tripID, seat string) string {
-	return fmt.Sprintf("seat_hold:%s:%s", tripID, seat)
+	return formatSeatKey(tripID, seat)
 }
 
 // validateConfirmRequest checks the request shape before touching Redis or the database.

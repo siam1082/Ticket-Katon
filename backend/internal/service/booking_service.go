@@ -38,14 +38,110 @@ func NewBookingService(
 	}
 }
 
-func (s *bookingService) ConfirmBooking(ctx context.Context, userID string, req *domain.ConfirmBookingRequest) (*domain.ConfirmBookingResponse, error) {
-	return nil, nil
+// ১২ অক্ষরের ইউনিক ক্রিপ্টোগ্রাফিক PNR জেনারেটর
+func generatePNR() string {
+	bytes := make([]byte, 4)
+	rand.Read(bytes)
+	return fmt.Sprintf("TK-%s", strings.ToUpper(hex.EncodeToString(bytes)))
+}
+
+// টিকিট নম্বর জেনারেটর
+func generateTicketNumber(seatNumber string) string {
+	bytes := make([]byte, 3)
+	rand.Read(bytes)
+	return fmt.Sprintf("TKT-%s-%s", seatNumber, strings.ToUpper(hex.EncodeToString(bytes)))
+}
+
+func (s *bookingService) ConfirmBooking(
+	ctx context.Context,
+	userID string,
+	req *domain.ConfirmBookingRequest,
+) (*domain.ConfirmBookingResponse, error) {
+	// ১. Redis Seat Hold Validation: নিশ্চিত করা সিটগুলো এই ইউজারের দখলেই আছে
+	for _, seat := range req.Seats {
+		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
+		heldBy, err := s.redisClient.Get(ctx, lockKey).Result()
+		if err == redis.Nil || heldBy != userID {
+			return nil, fmt.Errorf("hold on seat %s has expired or is invalid", seat)
+		} else if err != nil {
+			return nil, fmt.Errorf("failed to verify seat hold: %w", err)
+		}
+	}
+
+	// ২. ট্রিপের ফেয়ার সংগ্রহ করে টোটাল ক্যালকুলেট করা
+	trip, err := s.tripRepo.GetTripByID(ctx, req.TripID)
+	if err != nil {
+		return nil, fmt.Errorf("trip details not found: %w", err)
+	}
+
+	totalAmount := trip.PricePerSeat * float64(len(req.Seats))
+	bookingID := uuid.New().String()
+	pnrCode := generatePNR()
+
+	booking := &domain.Booking{
+		ID:             bookingID,
+		UserID:         userID,
+		TripID:         req.TripID,
+		PNRCode:        pnrCode,
+		TotalAmount:    totalAmount,
+		DiscountAmount: 0.0,
+		Status:         domain.BookingConfirmed,
+	}
+
+	// ৩. প্যাসেঞ্জার টিকিট স্ট্রাকচার রেডি করা
+	var tickets []domain.Ticket
+	for _, p := range req.Passengers {
+		tickets = append(tickets, domain.Ticket{
+			ID:              uuid.New().String(),
+			BookingID:       bookingID,
+			SeatNumber:      p.SeatNumber,
+			PassengerName:   p.Name,
+			PassengerPhone:  p.Phone,
+			PassengerGender: p.Gender,
+			TicketNumber:    generateTicketNumber(p.SeatNumber),
+			CreatedAt:       time.Now(),
+		})
+	}
+
+	// ৪. পেমেন্ট রেকর্ড গঠন
+	payment := &domain.Payment{
+		ID:               uuid.New().String(),
+		BookingID:        bookingID,
+		Gateway:          req.Payment.Gateway,
+		TransactionID:    req.Payment.TransactionID,
+		GatewayPaymentID: req.Payment.TransactionID,
+		Amount:           totalAmount,
+		Currency:         "BDT",
+		Status:           domain.PaymentSuccess,
+	}
+
+	// ৫. PostgreSQL ACID ট্রানজেকশনে ডাটাবেজে এক্সিকিউট করা
+	err = s.bookingRepo.CreateBookingWithSeats(ctx, booking, tickets, payment, req.Seats)
+	if err != nil {
+		return nil, fmt.Errorf("booking transaction failed: %w", err)
+	}
+
+	// ৬. বুকিং কনফার্ম হওয়ার পর Redis-এর টেম্পোরারি লক রিলিজ করা
+	for _, seat := range req.Seats {
+		lockKey := fmt.Sprintf("seat_hold:%s:%s", req.TripID, seat)
+		s.redisClient.Del(ctx, lockKey)
+	}
+
+	return &domain.ConfirmBookingResponse{
+		BookingID:     booking.ID,
+		PNRCode:       booking.PNRCode,
+		TripID:        booking.TripID,
+		TotalAmount:   booking.TotalAmount,
+		Status:        booking.Status,
+		Tickets:       tickets,
+		PaymentStatus: payment.Status,
+	}, nil
 }
 
 func (s *bookingService) GetBookingByPNR(ctx context.Context, pnr string) (*domain.Booking, []domain.Ticket, error) {
-	return nil, nil, nil
+	return s.bookingRepo.GetBookingByPNR(ctx, pnr)
 }
 
 func (s *bookingService) GetUserBookings(ctx context.Context, userID string) ([]domain.Booking, error) {
-	return nil, nil
+	return s.bookingRepo.GetBookingsByUserID(ctx, userID)
 }

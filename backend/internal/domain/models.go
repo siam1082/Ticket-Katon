@@ -123,71 +123,85 @@ type TripSeatLayoutResponse struct {
 type BookingStatus string
 
 const (
-	BookingStatusPending BookingStatus = "PENDING"
+	BookingStatusPending   BookingStatus = "PENDING"
 	BookingStatusConfirmed BookingStatus = "CONFIRMED"
 	BookingStatusCancelled BookingStatus = "CANCELLED"
 )
 
 type Booking struct {
-	ID		string		`json:"id"`
-	UserID	string      `json:"user_id"`
-	TripID  string      `json:"trip_id"`
-	PNRCode  string      `json:"pnr_code"`
-	TotalAmount  float64      `json:"total_amount"`
-	DiscountAmount  float64      `json:"discount_amount"`
-	Status  BookingStatus      `json:"status"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
+	ID             string        `json:"id"`
+	UserID         string        `json:"user_id"`
+	TripID         string        `json:"trip_id"`
+	PNRCode        string        `json:"pnr_code"`
+	TotalAmount    float64       `json:"total_amount"`
+	DiscountAmount float64       `json:"discount_amount"`
+	Status         BookingStatus `json:"status"`
+	CreatedAt      time.Time     `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 type PassengerInfo struct {
-	Name string `json:"name"`
-	Phone string `json:"phone"`
-	Gender string `json:"gender"`
+	Name       string `json:"name"`
+	Phone      string `json:"phone"`
+	Gender     string `json:"gender"`
 	SeatNumber string `json:"seat_number"`
 }
 
 type Ticket struct {
-	ID string `json:"id"`
-	BookingID string  `json:"booking_id"`
-	SeatNumber string  `json:"seat_number"`
-	PassengerName string  `json:"passenger_name"`
-	PassengerPhone string   `json:"passenger_phone"`
-	PassengerGender string   `json:"passenger_gender"`
-	TicketNumber  string   `json:"ticket_number"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	BookingID       string    `json:"booking_id"`
+	SeatNumber      string    `json:"seat_number"`
+	PassengerName   string    `json:"passenger_name"`
+	PassengerPhone  string    `json:"passenger_phone"`
+	PassengerGender string    `json:"passenger_gender"`
+	TicketNumber    string    `json:"ticket_number"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type PaymentGateway string
 
 const (
-	PaymentGatewayBkash  PaymentGateway = "BKASH"
-	PaymentGatewayNagad  PaymentGateway = "NAGAD"
+	PaymentGatewayBkash      PaymentGateway = "BKASH"
+	PaymentGatewayNagad      PaymentGateway = "NAGAD"
 	PaymentGatewaySSLCommerz PaymentGateway = "SSLCOMMERZ"
-	PaymentGatewayMock  PaymentGateway = "MOCK"
-	GatewayRocket PaymentGateway = "ROCKET"
-	GatewayUpay PaymentGateway = "UPAY"
+	PaymentGatewayRocket     PaymentGateway = "ROCKET"
+	PaymentGatewayUpay       PaymentGateway = "UPAY"
+	PaymentGatewayMock       PaymentGateway = "MOCK"
 )
+
+// IsValid reports whether the gateway is one the platform supports.
+func (g PaymentGateway) IsValid() bool {
+	switch g {
+	case PaymentGatewayBkash,
+		PaymentGatewayNagad,
+		PaymentGatewaySSLCommerz,
+		PaymentGatewayRocket,
+		PaymentGatewayUpay,
+		PaymentGatewayMock:
+		return true
+	}
+	return false
+}
 
 type PaymentStatus string
 
 const (
 	PaymentStatusInitiated PaymentStatus = "INITIATED"
-	PaymentStatusSuccess  PaymentStatus = "SUCCESS"
-	PaymentStatusFailed  PaymentStatus = "FAILED"
+	PaymentStatusSuccess   PaymentStatus = "SUCCESS"
+	PaymentStatusFailed    PaymentStatus = "FAILED"
 )
 
 type Payment struct {
-	ID  string  `json:"id"`
-	BookingID  string `json:"booking_id"`
-	Gateway  PaymentGateway `json:"gateway"`
-	TransactionID  string  `json:"transaction_id"`
-	GatewayPaymentID string  `json:"gateway_payment_id"`
-	Amount   float64  `json:"amount"`
-	Currency  string  `json:"currency"`
-	Status  PaymentStatus  `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID               string         `json:"id"`
+	BookingID        string         `json:"booking_id"`
+	Gateway          PaymentGateway `json:"gateway"`
+	TransactionID    string         `json:"transaction_id"`
+	GatewayPaymentID string         `json:"gateway_payment_id"`
+	Amount           float64        `json:"amount"`
+	Currency         string         `json:"currency"`
+	Status           PaymentStatus  `json:"status"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 type PaymentPayload struct {
@@ -198,19 +212,19 @@ type PaymentPayload struct {
 // REQUEST & RESPONSE DTOS
 
 type ConfirmBookingRequest struct {
-	TripID  string  `json:"trip_id"`
-	Seats  []string  `json:"seats"`
+	TripID     string          `json:"trip_id"`
+	Seats      []string        `json:"seats"`
 	Passengers []PassengerInfo `json:"passengers"`
 	Payment    PaymentPayload  `json:"payment"`
 }
 
 type ConfirmBookingResponse struct {
-	BookingID  string   `json:"booking_id"`
-	PNRCode   string   `json:"pnr_code"`
-	TripID        string        `json:"trip_id"`
-	TotalAmount   float64       `json:"total_amount"`
-	DiscountAmount float64      `json:"discount_amount"`
-	Status        BookingStatus `json:"status"`
-	Tickets       []Ticket      `json:"tickets"`
-	PaymentStatus PaymentStatus `json:"payment_status"`
+	BookingID      string        `json:"booking_id"`
+	PNRCode        string        `json:"pnr_code"`
+	TripID         string        `json:"trip_id"`
+	TotalAmount    float64       `json:"total_amount"`
+	DiscountAmount float64       `json:"discount_amount"`
+	Status         BookingStatus `json:"status"`
+	Tickets        []Ticket      `json:"tickets"`
+	PaymentStatus  PaymentStatus `json:"payment_status"`
 }

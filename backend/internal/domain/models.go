@@ -126,7 +126,6 @@ const (
 	BookingStatusPending BookingStatus = "PENDING"
 	BookingStatusConfirmed BookingStatus = "CONFIRMED"
 	BookingStatusCancelled BookingStatus = "CANCELLED"
-	BookingStatusRefunded BookingStatus = "REFUNDED"
 )
 
 type Booking struct {
@@ -142,10 +141,10 @@ type Booking struct {
 }
 
 type PassengerInfo struct {
-	SeatNumber string `json:"seat_number"`
 	Name string `json:"name"`
 	Phone string `json:"phone"`
 	Gender string `json:"gender"`
+	SeatNumber string `json:"seat_number"`
 }
 
 type Ticket struct {
@@ -166,6 +165,8 @@ const (
 	PaymentGatewayNagad  PaymentGateway = "NAGAD"
 	PaymentGatewaySSLCommerz PaymentGateway = "SSLCOMMERZ"
 	PaymentGatewayMock  PaymentGateway = "MOCK"
+	GatewayRocket PaymentGateway = "ROCKET"
+	GatewayUpay PaymentGateway = "UPAY"
 )
 
 type PaymentStatus string
@@ -174,7 +175,6 @@ const (
 	PaymentStatusInitiated PaymentStatus = "INITIATED"
 	PaymentStatusSuccess  PaymentStatus = "SUCCESS"
 	PaymentStatusFailed  PaymentStatus = "FAILED"
-	PaymentStatusRefunded  PaymentStatus = "REFUNDED"
 )
 
 type Payment struct {
@@ -186,9 +186,13 @@ type Payment struct {
 	Amount   float64  `json:"amount"`
 	Currency  string  `json:"currency"`
 	Status  PaymentStatus  `json:"status"`
-	RawPayload  map[string]any `json:"raw_payload"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+type PaymentPayload struct {
+	Gateway       PaymentGateway `json:"gateway"`
+	TransactionID string         `json:"transaction_id"`
 }
 
 // REQUEST & RESPONSE DTOS
@@ -197,13 +201,16 @@ type ConfirmBookingRequest struct {
 	TripID  string  `json:"trip_id"`
 	Seats  []string  `json:"seats"`
 	Passengers []PassengerInfo `json:"passengers"`
-	Gateway PaymentGateway `json:"gateway"`
+	Payment    PaymentPayload  `json:"payment"`
 }
 
 type ConfirmBookingResponse struct {
 	BookingID  string   `json:"booking_id"`
 	PNRCode   string   `json:"pnr_code"`
-	TotalAmount float64  `json:"total_amount"`
-	Status  string `json:"status"`
-	TicketNumbers []string `json:"ticket_numbers"`
+	TripID        string        `json:"trip_id"`
+	TotalAmount   float64       `json:"total_amount"`
+	DiscountAmount float64      `json:"discount_amount"`
+	Status        BookingStatus `json:"status"`
+	Tickets       []Ticket      `json:"tickets"`
+	PaymentStatus PaymentStatus `json:"payment_status"`
 }

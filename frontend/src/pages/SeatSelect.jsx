@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { CheckCircle2, AlertCircle, Clock, ShieldCheck, X } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Clock, ShieldCheck, X, AlertTriangle } from 'lucide-react';
 
 export default function SeatSelect() {
   const [searchParams] = useSearchParams();
@@ -13,6 +13,7 @@ export default function SeatSelect() {
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState(null);
   const [selectedSeat, setSelectedSeat] = useState(null);
+  const [selectedSeatFare, setSelectedSeatFare] = useState(0);
   const [isHolding, setIsHolding] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [error, setError] = useState('');
@@ -22,7 +23,7 @@ export default function SeatSelect() {
   const [paymentMethod, setPaymentMethod] = useState('bkash');
   const [walletNumber, setWalletNumber] = useState('');
   const [pinNumber, setPinNumber] = useState('');
-  const [holdTimer, setHoldTimer] = useState(600); // 10 minutes
+  const [holdTimer, setHoldTimer] = useState(300); // 5 minutes TTL match
 
   const fetchSeats = useCallback(async () => {
     try {
@@ -58,11 +59,11 @@ export default function SeatSelect() {
       setShowPaymentModal(false);
       setSelectedSeat(null);
       setError('');
-      fetchSeats(); // Seat inventory instant refresh
+      fetchSeats();
     }
   };
 
-  // Hold Timer logic
+  // Hold Timer logic (Synced with 5-minute Redis LockTTL)
   useEffect(() => {
     let timer;
     if (showPaymentModal && holdTimer > 0) {
@@ -70,23 +71,27 @@ export default function SeatSelect() {
         setHoldTimer((prev) => prev - 1);
       }, 1000);
     } else if (holdTimer === 0 && showPaymentModal) {
-      alert('Seat hold time expired! Please select seat again.');
+      alert('Seat reservation expired! Please select your seat again.');
       handleClosePaymentModal();
     }
     return () => clearInterval(timer);
   }, [showPaymentModal, holdTimer]);
 
   const handleSeatClick = (seat) => {
-    // Shudhu AVAILABLE thakle click kora jabe
     if (seat.status !== 'AVAILABLE') return;
-    setSelectedSeat(seat.seat_number === selectedSeat ? null : seat.seat_number);
+    if (selectedSeat === seat.seat_number) {
+      setSelectedSeat(null);
+      setSelectedSeatFare(0);
+    } else {
+      setSelectedSeat(seat.seat_number);
+      setSelectedSeatFare(seat.fare || 800);
+    }
     setError('');
   };
 
-  // Step 1: Hold seat in Redis & open Demo Payment Modal
   const handleProceedToPayment = async () => {
     if (!isAuthenticated) {
-      alert('Please login to hold seats and make payment!');
+      alert('Please login to reserve seats and complete payment!');
       navigate('/login');
       return;
     }
@@ -100,22 +105,22 @@ export default function SeatSelect() {
     setError('');
 
     try {
-      await API.post('/seats/hold', {
+      const holdRes = await API.post('/seats/hold', {
         trip_id: tripId,
         seat_numbers: [selectedSeat]
       });
 
-      setHoldTimer(600);
+      const expirySeconds = holdRes.data?.expires_in_seconds || 300;
+      setHoldTimer(expirySeconds);
       setShowPaymentModal(true);
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not hold seat. Another user might be booking it.');
-      fetchSeats(); // Refresh kore latest status show kora
+      setError(err.response?.data?.error || 'Could not lock seat. It might have just been taken.');
+      fetchSeats();
     } finally {
       setIsHolding(false);
     }
   };
 
-  // Step 2: Final Payment Confirmation
   const handleConfirmPayment = async (e) => {
     e.preventDefault();
     if (!walletNumber || !pinNumber) {
@@ -147,7 +152,7 @@ export default function SeatSelect() {
       setShowPaymentModal(false);
       setBookingSuccess(confirmRes.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Payment failed or seat lock expired');
+      setError(err.response?.data?.error || 'Payment confirmation failed or lock expired');
       setShowPaymentModal(false);
       fetchSeats();
     } finally {
@@ -161,10 +166,18 @@ export default function SeatSelect() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  if (loading) return <p style={{ textAlign: 'center', padding: '40px' }}>Loading seat layout...</p>;
+  if (loading) return <p style={{ textAlign: 'center', padding: '60px' }}>Loading seat layout...</p>;
+
+  // Group seats by Coach / Deck if available
+  const seatGroups = layout?.seats?.reduce((groups, seat) => {
+    const groupName = seat.deck_or_class || 'General';
+    if (!groups[groupName]) groups[groupName] = [];
+    groups[groupName].push(seat);
+    return groups;
+  }, {}) || {};
 
   return (
-    <div style={{ maxWidth: '800px', margin: '20px auto', padding: '24px', background: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+    <div style={{ maxWidth: '860px', margin: '20px auto', padding: '24px', background: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
       {bookingSuccess ? (
         <div style={{ textAlign: 'center', padding: '40px 20px' }}>
           <CheckCircle2 size={64} color="#16a34a" style={{ margin: '0 auto 16px' }} />
@@ -185,9 +198,9 @@ export default function SeatSelect() {
         </div>
       ) : (
         <>
-          <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>Select Your Seat</h2>
+          <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '6px' }}>Select Your Seat</h2>
           <p style={{ color: '#6b7280', marginBottom: '20px' }}>
-            <strong>{layout?.operator_name}</strong> • Bus Reg: {layout?.registration_no}
+            <strong>{layout?.operator_name}</strong> • Reg: {layout?.registration_no} • {layout?.transport_type}
           </p>
 
           {error && (
@@ -197,63 +210,72 @@ export default function SeatSelect() {
             </div>
           )}
 
-          {/* Seat Layout View with Status Identifier */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 70px)', gap: '14px', justifyContent: 'center', margin: '30px 0', padding: '24px', background: '#f9fafb', borderRadius: '12px' }}>
-            {layout?.seats?.map((s) => {
-              const isAvailable = s.status === 'AVAILABLE';
-              const isHeld = s.status === 'HELD' || s.status === 'LOCKED';
-              const isSelected = selectedSeat === s.seat_number;
+          {/* Seat Layout View (Supports Bus, Train Coach, and Launch Cabins) */}
+          {Object.entries(seatGroups).map(([groupTitle, seatsInGroup]) => (
+            <div key={groupTitle} style={{ marginBottom: '28px' }}>
+              {Object.keys(seatGroups).length > 1 && (
+                <h4 style={{ fontSize: '15px', fontWeight: '700', color: '#374151', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px', marginBottom: '16px' }}>
+                  {groupTitle.replace('_', ' ')}
+                </h4>
+              )}
 
-              // Color determination
-              let bg = '#ffffff';
-              let color = '#1f2937';
-              let border = '1px solid #d1d5db';
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(68px, 1fr))', gap: '12px', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
+                {seatsInGroup.map((s) => {
+                  const isAvailable = s.status === 'AVAILABLE';
+                  const isHeld = s.status === 'HELD' || s.status === 'LOCKED';
+                  const isSelected = selectedSeat === s.seat_number;
 
-              if (isSelected) {
-                bg = '#22c55e';
-                color = '#ffffff';
-                border = '2px solid #15803d';
-              } else if (isHeld) {
-                bg = '#fef08a'; // Yellow for Processing / Held
-                color = '#854d0e';
-                border = '1px solid #eab308';
-              } else if (!isAvailable) {
-                bg = '#9ca3af'; // Grey for Booked
-                color = '#ffffff';
-              }
+                  let bg = '#ffffff';
+                  let color = '#1f2937';
+                  let border = '1px solid #d1d5db';
 
-              return (
-                <button
-                  key={s.seat_number}
-                  disabled={!isAvailable}
-                  onClick={() => handleSeatClick(s)}
-                  style={{
-                    height: '55px',
-                    borderRadius: '8px',
-                    border: border,
-                    background: bg,
-                    color: color,
-                    fontWeight: '700',
-                    cursor: isAvailable ? 'pointer' : 'not-allowed',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: isSelected ? '0 0 10px rgba(34, 197, 94, 0.4)' : 'none',
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <span>{s.seat_number}</span>
-                  <span style={{ fontSize: '10px' }}>
-                    {isHeld ? 'Processing' : !isAvailable ? 'Booked' : `${s.fare || 800}৳`}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                  if (isSelected) {
+                    bg = '#22c55e';
+                    color = '#ffffff';
+                    border = '2px solid #15803d';
+                  } else if (isHeld) {
+                    bg = '#fef08a';
+                    color = '#854d0e';
+                    border = '1px solid #eab308';
+                  } else if (!isAvailable) {
+                    bg = '#9ca3af';
+                    color = '#ffffff';
+                  }
+
+                  return (
+                    <button
+                      key={s.seat_number}
+                      disabled={!isAvailable}
+                      onClick={() => handleSeatClick(s)}
+                      style={{
+                        height: '54px',
+                        borderRadius: '8px',
+                        border: border,
+                        background: bg,
+                        color: color,
+                        fontWeight: '700',
+                        cursor: isAvailable ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: isSelected ? '0 0 10px rgba(34, 197, 94, 0.4)' : 'none',
+                        transition: 'all 0.15s'
+                      }}
+                    >
+                      <span style={{ fontSize: '13px' }}>{s.seat_number}</span>
+                      <span style={{ fontSize: '10px' }}>
+                        {isHeld ? 'Held' : !isAvailable ? 'Booked' : `${s.fare || 800}৳`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
 
           {/* Legend Identifiers */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', marginBottom: '30px', fontSize: '13px', color: '#4b5563', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '24px 0', fontSize: '13px', color: '#4b5563', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <span style={{ width: '12px', height: '12px', background: '#ffffff', border: '1px solid #d1d5db', marginRight: '6px', borderRadius: '2px' }}></span> Available
             </div>
@@ -271,7 +293,7 @@ export default function SeatSelect() {
           <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>Selected Seat:</p>
-              <h4 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>{selectedSeat || 'None'}</h4>
+              <h4 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>{selectedSeat ? `${selectedSeat} (${selectedSeatFare} BDT)` : 'None'}</h4>
             </div>
             <button
               onClick={handleProceedToPayment}
@@ -283,24 +305,20 @@ export default function SeatSelect() {
                 padding: '12px 28px',
                 borderRadius: '8px',
                 fontWeight: '700',
-                cursor: selectedSeat && !isHolding ? 'pointer' : 'not-allowed',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
+                cursor: selectedSeat && !isHolding ? 'pointer' : 'not-allowed'
               }}
             >
-              {isHolding ? 'Locking Seat...' : 'Proceed to Payment'}
+              {isHolding ? 'Holding Seat...' : 'Proceed to Payment'}
             </button>
           </div>
         </>
       )}
 
-      {/* Demo Payment Modal */}
+      {/* Demo Payment Sandbox Modal */}
       {showPaymentModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '420px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '430px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
             
-            {/* Modal Header with Close (X) Trigger */}
             <div style={{ background: paymentMethod === 'bkash' ? '#e2136e' : '#f7941d', padding: '16px 20px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>Demo Payment Gateway</h3>
@@ -311,13 +329,19 @@ export default function SeatSelect() {
               </button>
             </div>
 
-            {/* Hold Timer Banner */}
+            {/* Strict Sandbox Disclaimer */}
+            <div style={{ background: '#fffbeb', borderBottom: '1px solid #fef3c7', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#b45309' }}>
+              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
+              <span><strong>Simulation only:</strong> Do NOT enter your real wallet number or actual PIN.</span>
+            </div>
+
+            {/* 5-Minute Reverse Countdown Timer */}
             <div style={{ background: '#fef3c7', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: '#92400e' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={14} /> Seat reserved for:</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={14} /> Reservation expires in:</span>
               <strong>{formatTimer(holdTimer)}</strong>
             </div>
 
-            {/* Payment Method Switcher */}
+            {/* Gateway Selector */}
             <div style={{ display: 'flex', padding: '16px 20px 0', gap: '10px' }}>
               <button
                 type="button"
@@ -335,7 +359,6 @@ export default function SeatSelect() {
               </button>
             </div>
 
-            {/* Payment Form */}
             <form onSubmit={handleConfirmPayment} style={{ padding: '20px' }}>
               <div style={{ background: '#f9fafb', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '6px' }}>
@@ -344,12 +367,12 @@ export default function SeatSelect() {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px' }}>
                   <span style={{ color: '#6b7280' }}>Total Amount:</span>
-                  <strong style={{ color: '#111827' }}>800 BDT</strong>
+                  <strong style={{ color: '#111827' }}>{selectedSeatFare} BDT</strong>
                 </div>
               </div>
 
               <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Your {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Demo {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number</label>
                 <input
                   type="text"
                   placeholder="017XXXXXXXX"
@@ -361,7 +384,7 @@ export default function SeatSelect() {
               </div>
 
               <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Enter PIN (Demo: any 4 digits)</label>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Enter PIN (Simulation: any 4 digits)</label>
                 <input
                   type="password"
                   placeholder="••••"
@@ -388,11 +411,11 @@ export default function SeatSelect() {
                   cursor: isHolding ? 'not-allowed' : 'pointer'
                 }}
               >
-                {isHolding ? 'Processing Payment...' : `Confirm Pay 800 BDT`}
+                {isHolding ? 'Processing Payment...' : `Confirm Pay ${selectedSeatFare} BDT`}
               </button>
 
               <div style={{ textAlign: 'center', marginTop: '12px', fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                <ShieldCheck size={14} color="#16a34a" /> Demo Sandbox • No actual money charged
+                <ShieldCheck size={14} color="#16a34a" /> Demo Sandbox • No real currency will be charged
               </div>
             </form>
 

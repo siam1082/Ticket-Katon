@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import API from '../services/api';
+import { Bus, Clock, MapPin, Ticket } from 'lucide-react';
 import './SearchResults.css';
 
 export default function SearchResults() {
@@ -16,49 +17,75 @@ export default function SearchResults() {
   const date = searchParams.get('date') || '';
 
   useEffect(() => {
-    const fetch = async () => {
+    const fetchTrips = async () => {
       setLoading(true);
       setError('');
       try {
-        const res = await API.get('/schedules', { params: { type, from, to, date } });
-        setResults(res.data?.data || res.data || []);
+        const res = await API.get('/trips/search', {
+          params: {
+            origin: from,
+            destination: to,
+            date: date,
+            type: type
+          }
+        });
+        setResults(Array.isArray(res.data) ? res.data : (res.data?.data || []));
       } catch (err) {
-        setError(err.response?.data?.message || 'Failed to load schedules');
+        setError(err.response?.data?.error || 'Failed to load trip schedules');
       } finally {
         setLoading(false);
       }
     };
-    fetch();
+    fetchTrips();
   }, [type, from, to, date]);
 
-  const handleSelect = (schedule) => {
-    navigate(`/seat-select?scheduleId=${schedule.id}`);
+  const handleSelect = (trip) => {
+    navigate(`/seat-select?tripId=${trip.id}`);
   };
 
   return (
-    <div className="gov-search-results">
-      <div className="card">
-        <h2 className="card-title">Search Results</h2>
-        <p className="muted">{type.toUpperCase()} — {from} ➔ {to} — {date}</p>
+    <div className="gov-search-results" style={{ maxWidth: '900px', margin: '0 auto', padding: '20px' }}>
+      <div className="card" style={{ background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
+        <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '8px' }}>Available Schedules</h2>
+        <p style={{ color: '#6b7280', marginBottom: '20px' }}>
+          <strong>{type.toUpperCase()}</strong> • {from} ➔ {to} • {date}
+        </p>
 
         {loading ? (
-          <p className="muted">Loading schedules...</p>
+          <p style={{ textAlign: 'center', color: '#6b7280', padding: '40px' }}>Searching schedules from Ticket-Katon backend...</p>
         ) : error ? (
-          <div className="error-box">{error}</div>
+          <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '12px', borderRadius: '8px' }}>{error}</div>
         ) : results.length === 0 ? (
-          <p className="muted">No schedules found for selected route.</p>
+          <div style={{ textAlign: 'center', padding: '40px' }}>
+            <p style={{ color: '#4b5563', fontSize: '16px' }}>No trips found for this date & route.</p>
+            <button className="btn-secondary" style={{ marginTop: '12px' }} onClick={() => navigate('/')}>Search Again</button>
+          </div>
         ) : (
-          <div className="results-list">
-            {results.map((s) => (
-              <div key={s.id} className="result-item">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {results.map((t) => (
+              <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #e5e7eb', padding: '16px 20px', borderRadius: '8px', background: '#fafafa' }}>
                 <div>
-                  <strong>{s.operator}</strong>
-                  <div className="muted">{s.from} ➔ {s.to}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', fontSize: '18px' }}>
+                    <Bus size={20} color="#15803d" />
+                    <span>{t.operator_name}</span>
+                    <span style={{ fontSize: '12px', background: '#e0e7ff', color: '#3730a3', padding: '2px 8px', borderRadius: '4px' }}>{t.registration_no}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '16px', color: '#4b5563', marginTop: '8px', fontSize: '14px' }}>
+                    <span><MapPin size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {t.origin} ➔ {t.destination}</span>
+                    <span><Clock size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {new Date(t.departure_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '13px', color: '#16a34a', fontWeight: '600' }}>
+                    <Ticket size={14} style={{ display: 'inline', verticalAlign: 'middle' }} /> {t.available_seats} seats available
+                  </div>
                 </div>
-                <div className="result-meta">
-                  <div>{new Date(s.departure).toLocaleString()}</div>
-                  <div className="price">{s.base_fare} BDT</div>
-                  <button className="btn-primary" onClick={() => handleSelect(s)}>Select Seats</button>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '22px', fontWeight: '800', color: '#111827', marginBottom: '8px' }}>{t.base_fare} BDT</div>
+                  <button 
+                    onClick={() => handleSelect(t)}
+                    style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}
+                  >
+                    Select Seats
+                  </button>
                 </div>
               </div>
             ))}

@@ -50,8 +50,8 @@ func main() {
 	// 3. Services
 	healthSvc := service.NewHealthService(pgPool, redisClient)
 	authSvc := service.NewAuthService(userRepo, tokenMaker)
-	tripSvc := service.NewTripService(tripRepo)
 	seatLockSvc := service.NewSeatLockService(redisClient)
+	tripSvc := service.NewTripService(tripRepo, seatLockSvc)
 	bookingRepo := postgres.NewBookingRepository(pgPool)
 	bookingSvc := service.NewBookingService(bookingRepo, redisClient)
 

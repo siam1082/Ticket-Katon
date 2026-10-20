@@ -86,7 +86,7 @@ func (h *SeatLockHandler) Hold(w http.ResponseWriter, r *http.Request) {
 		Message:          "Seats held successfully",
 		TripID:           req.TripID,
 		SeatsHeld:        req.SeatNumbers,
-		ExpiresInSeconds: 300, // 5 minutes
+		ExpiresInSeconds: int(service.LockTTL.Seconds()),
 	})
 }
 

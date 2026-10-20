@@ -1,165 +1,123 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { ArrowRight, Ticket } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { UserPlus, Building2, ArrowRight } from 'lucide-react';
 import API from '../services/api';
-import './Register.css';
+import './Auth.css';
+
+const STAFF_ROLES = ['OPERATOR_ADMIN', 'SUPER_ADMIN'];
 
 export default function Register() {
-    const [formData, setFormData] = useState({
-        name: '',
-        email: '',
-        phone: '',
-        password: '',
-        confirmPassword: ''
-    });
-    const [error, setError] = useState('');
-    const [loading, setLoading] = useState(false);
-    const { login } = useAuth();
-    const navigate = useNavigate();
+  const [formData, setFormData] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+  });
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
 
-    const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
-    };
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setError('');
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
 
-        if (formData.password !== formData.confirmPassword) {
-            setError('Passwords do not match');
-            return;
-        }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters.');
+      return;
+    }
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
 
-        setLoading(true);
-        try {
-            const response = await API.post('/auth/register', {
-                name: formData.name,
-                email: formData.email,
-                phone: formData.phone,
-                password: formData.password,
-            });
+    setLoading(true);
+    try {
+      // No role is sent: the server always creates a passenger account.
+      const { data } = await API.post('/auth/register', {
+        full_name: formData.fullName.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim(),
+        password: formData.password,
+      });
 
-            const { user, token } = response.data;
-            login(user, token, user?.role || 'user');
-            navigate('/');
-        } catch (err) {
-            setError(err.response?.data?.message || 'Registration failed. Try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
+      const { user, token } = data;
+      if (token) {
+        login(user, token, STAFF_ROLES.includes(user?.role) ? 'admin' : 'user');
+        navigate('/');
+      } else {
+        navigate('/login');
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || err.response?.data?.message || 'Registration failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    return (
-        <div className="gov-register-shell">
-            <div className="gov-register-panel">
-                <div className="gov-register-header">
-                    <div className="gov-branding">
-                        <div className="gov-brand-mark" aria-hidden="true">
-                            <Building2 size={28} />
-                        </div>
-                        <div>
-                            <span className="gov-eyebrow">Government Transport Portal</span>
-                            <h1>Passenger Registration</h1>
-                        </div>
-                    </div>
-                    <p className="gov-subtitle">Create your secure account to book tickets online</p>
-                </div>
-
-                <div className="gov-register-body">
-                    <div className="gov-register-intro">
-                        <UserPlus size={20} />
-                        <span>New passenger account</span>
-                    </div>
-
-                    {error && <div className="gov-error-box">{error}</div>}
-
-                    <form onSubmit={handleSubmit} className="gov-register-form">
-                        <div className="gov-field-row">
-                            <div className="gov-field">
-                                <label htmlFor="name">Full Name</label>
-                                <input
-                                    id="name"
-                                    type="text"
-                                    name="name"
-                                    value={formData.name}
-                                    onChange={handleChange}
-                                    placeholder="e.g. John Doe"
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <div className="gov-field-row two-col">
-                            <div className="gov-field">
-                                <label htmlFor="email">Email Address</label>
-                                <input
-                                    id="email"
-                                    type="email"
-                                    name="email"
-                                    value={formData.email}
-                                    onChange={handleChange}
-                                    placeholder="name@example.com"
-                                    required
-                                />
-                            </div>
-
-                            <div className="gov-field">
-                                <label htmlFor="phone">Mobile Number</label>
-                                <input
-                                    id="phone"
-                                    type="tel"
-                                    name="phone"
-                                    value={formData.phone}
-                                    onChange={handleChange}
-                                    placeholder="017XXXXXXXX"
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <div className="gov-field-row two-col">
-                            <div className="gov-field">
-                                <label htmlFor="password">Password</label>
-                                <input
-                                    id="password"
-                                    type="password"
-                                    name="password"
-                                    value={formData.password}
-                                    onChange={handleChange}
-                                    placeholder="••••••••"
-                                    required
-                                />
-                            </div>
-
-                            <div className="gov-field">
-                                <label htmlFor="confirmPassword">Confirm Password</label>
-                                <input
-                                    id="confirmPassword"
-                                    type="password"
-                                    name="confirmPassword"
-                                    value={formData.confirmPassword}
-                                    onChange={handleChange}
-                                    placeholder="••••••••"
-                                    required
-                                />
-                            </div>
-                        </div>
-
-                        <button type="submit" className="gov-submit-btn" disabled={loading}>
-                            {loading ? 'Creating Account...' : 'Create Account'} <ArrowRight size={16} />
-                        </button>
-                    </form>
-
-                    <p className="gov-footer-text">
-                        Already have an account?{' '}
-                        <Link to="/login" className="gov-link">Login here</Link>
-                    </p>
-                </div>
+  return (
+    <div className="auth-shell">
+      <div className="auth-panel">
+        <div className="auth-header">
+          <div className="auth-brand">
+            <div className="auth-mark" aria-hidden="true">
+              <Ticket size={22} />
             </div>
+            <div>
+              <span className="auth-eyebrow">Academic demo</span>
+              <h1>Create a demo account</h1>
+            </div>
+          </div>
+          <p className="auth-sub">Use any email. Do not enter real personal or payment details.</p>
         </div>
-    );
+
+        <div className="auth-body">
+          {error && <div className="auth-error" role="alert">{error}</div>}
+
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="auth-field">
+              <label htmlFor="fullName">Full name</label>
+              <input id="fullName" name="fullName" type="text" autoComplete="name" value={formData.fullName} onChange={handleChange} placeholder="e.g. Rahim Uddin" required />
+            </div>
+
+            <div className="auth-row two">
+              <div className="auth-field">
+                <label htmlFor="email">Email</label>
+                <input id="email" name="email" type="email" autoComplete="email" value={formData.email} onChange={handleChange} placeholder="name@example.com" required />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="phone">Mobile number</label>
+                <input id="phone" name="phone" type="tel" autoComplete="tel" value={formData.phone} onChange={handleChange} placeholder="017XXXXXXXX" required />
+              </div>
+            </div>
+
+            <div className="auth-row two">
+              <div className="auth-field">
+                <label htmlFor="password">Password</label>
+                <input id="password" name="password" type="password" autoComplete="new-password" value={formData.password} onChange={handleChange} placeholder="At least 6 characters" required />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="confirmPassword">Confirm password</label>
+                <input id="confirmPassword" name="confirmPassword" type="password" autoComplete="new-password" value={formData.confirmPassword} onChange={handleChange} placeholder="Repeat password" required />
+              </div>
+            </div>
+
+            <button type="submit" className="auth-submit" disabled={loading}>
+              {loading ? 'Creating account...' : 'Create account'} <ArrowRight size={16} aria-hidden="true" />
+            </button>
+          </form>
+
+          <p className="auth-foot">
+            Already have an account? <Link to="/login" className="auth-link">Sign in</Link>
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }

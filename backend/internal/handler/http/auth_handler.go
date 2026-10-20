@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/middleware"
@@ -13,80 +16,116 @@ import (
 	"ticket-katon-backend/internal/service"
 )
 
+const (
+	maxLoginFailures = 5
+	loginBlockWindow = 15 * time.Minute
+)
+
 type AuthHandler struct {
-	svc *service.AuthService
+	svc     *service.AuthService
+	limiter *loginLimiter
 }
 
 func NewAuthHandler(svc *service.AuthService) *AuthHandler {
-	return &AuthHandler{svc: svc}
+	return &AuthHandler{
+		svc:     svc,
+		limiter: newLoginLimiter(maxLoginFailures, loginBlockWindow),
+	}
+}
+
+func authWriteJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func authWriteError(w http.ResponseWriter, status int, msg string) {
+	authWriteJSON(w, status, map[string]string{"error": msg})
+}
+
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var input service.RegisterInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
-		return
-	}
-
-	if input.Email == "" || input.Password == "" || input.FullName == "" {
-		http.Error(w, `{"error":"name, email and password are required"}`, http.StatusBadRequest)
+		authWriteError(w, http.StatusBadRequest, "invalid request payload")
 		return
 	}
 
 	resp, err := h.svc.Register(r.Context(), input)
 	if err != nil {
-		// টার্মিনালে আসল এরর প্রিন্ট করার জন্য:
-		log.Printf("[REGISTER ERROR] %+v\n", err)
-
-		if errors.Is(err, domain.ErrConflict) {
-			http.Error(w, `{"error":"email already registered"}`, http.StatusConflict)
-			return
+		var ve *service.ValidationError
+		switch {
+		case errors.As(err, &ve):
+			authWriteError(w, http.StatusBadRequest, ve.Msg)
+		case errors.Is(err, domain.ErrConflict):
+			authWriteError(w, http.StatusConflict, "email or mobile number is already registered")
+		default:
+			log.Printf("[REGISTER ERROR] %+v", err)
+			authWriteError(w, http.StatusInternalServerError, "failed to create account")
 		}
-
-		// ডিবাগিংয়ের সুবিধার জন্য রেসপন্সেও এরর মেসেজ পাঠানো হচ্ছে:
-		http.Error(w, fmt.Sprintf(`{"error":"failed to create user: %v"}`, err), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(resp)
+	authWriteJSON(w, http.StatusCreated, resp)
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+
 	var input service.LoginInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		http.Error(w, `{"error":"invalid request payload"}`, http.StatusBadRequest)
+		authWriteError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+	if strings.TrimSpace(input.Email) == "" || input.Password == "" {
+		authWriteError(w, http.StatusBadRequest, "email and password are required")
+		return
+	}
+
+	key := strings.ToLower(strings.TrimSpace(input.Email)) + "|" + clientIP(r)
+	if remaining, blocked := h.limiter.blocked(key); blocked {
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(remaining.Seconds())+1))
+		authWriteError(w, http.StatusTooManyRequests, "too many failed attempts, please try again later")
 		return
 	}
 
 	resp, err := h.svc.Login(r.Context(), input)
 	if err != nil {
 		if errors.Is(err, domain.ErrUnauthorized) {
-			http.Error(w, `{"error":"invalid email or password"}`, http.StatusUnauthorized)
+			h.limiter.fail(key)
+			authWriteError(w, http.StatusUnauthorized, "invalid email or password")
 			return
 		}
-		http.Error(w, `{"error":"failed to login"}`, http.StatusInternalServerError)
+		log.Printf("[LOGIN ERROR] %+v", err)
+		authWriteError(w, http.StatusInternalServerError, "failed to login")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	h.limiter.reset(key)
+	authWriteJSON(w, http.StatusOK, resp)
 }
 
 func (h *AuthHandler) Profile(w http.ResponseWriter, r *http.Request) {
 	claims, ok := r.Context().Value(middleware.UserClaimsKey).(*token.CustomClaims)
 	if !ok || claims == nil {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		authWriteError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	user, err := h.svc.GetProfile(r.Context(), claims.UserID)
 	if err != nil {
-		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		authWriteError(w, http.StatusNotFound, "user not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(user)
+	authWriteJSON(w, http.StatusOK, user)
 }

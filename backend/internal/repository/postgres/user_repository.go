@@ -46,7 +46,7 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 	query := `
 		SELECT id, full_name, email, phone_number, password_hash, role, created_at, updated_at
 		FROM users
-		WHERE email = $1
+		WHERE lower(email) = lower($1)
 	`
 	u := &domain.User{}
 	err := r.pool.QueryRow(ctx, query, email).Scan(

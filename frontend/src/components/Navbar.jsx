@@ -1,59 +1,62 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { Bus, Train, Ship, User, LogOut } from 'lucide-react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Bus, Train, Ship, User, LogOut, Ticket } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
+const SERVICES = [
+  { type: 'bus', label: 'Bus', Icon: Bus },
+  { type: 'train', label: 'Train', Icon: Train },
+  { type: 'launch', label: 'Launch', Icon: Ship },
+];
+
 export default function Navbar() {
-    const { isAuthenticated, user, logout } = useAuth();
-    const navigate = useNavigate();
+  const { isAuthenticated, user, logout } = useAuth();
+  const navigate = useNavigate();
 
-    const handleLogout = () => {
-        logout();
-        navigate('/login');
-    };
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
-    return (
-        <nav className="gov-navbar">
-            <div>
-                <Link to="/" className="gov-logo">
-                    Ticket<span className="gov-accent">Katon</span>
-                </Link>
-            </div>
+  const displayName = user?.full_name || user?.name || 'Profile';
 
-            <div className="gov-services">
-                <Link to="/?type=bus" className="gov-service-item">
-                    <Bus size={18} />
-                    <span>Bus</span>
-                </Link>
-                <Link to="/?type=train" className="gov-service-item">
-                    <Train size={18} />
-                    <span>Train</span>
-                </Link>
-                <Link to="/?type=launch" className="gov-service-item">
-                    <Ship size={18} />
-                    <span>Launch</span>
-                </Link>
-            </div>
+  return (
+    <header className="nav">
+      <div className="nav-inner">
+        <Link to="/" className="nav-logo" aria-label="TicketKaton home">
+          <span className="nav-logo-mark" aria-hidden="true">
+            <Ticket size={18} />
+          </span>
+          Ticket<span>Katon</span>
+        </Link>
 
-            <div>
-                {isAuthenticated ? (
-                    <div className="gov-user-section">
-                        <Link to="/profile" className="gov-profile-link">
-                            <User size={18} />
-                            <span>{user?.name || 'Profile'}</span>
-                        </Link>
-                        <button onClick={handleLogout} className="gov-logout-btn">
-                            <LogOut size={16} />
-                            <span>Logout</span>
-                        </button>
-                    </div>
-                ) : (
-                    <div className="gov-guest-section">
-                        <Link to="/login" className="gov-login-btn">Login</Link>
-                        <Link to="/register" className="gov-signup-btn">Sign Up</Link>
-                    </div>
-                )}
-            </div>
+        <nav className="nav-services" aria-label="Transport types">
+          {SERVICES.map(({ type, label, Icon }) => (
+            <NavLink key={type} to={`/?type=${type}`} className="nav-service">
+              <Icon size={18} aria-hidden="true" />
+              <span>{label}</span>
+            </NavLink>
+          ))}
         </nav>
-    );
+
+        {isAuthenticated ? (
+          <div className="nav-actions">
+            <Link to="/profile" className="nav-profile">
+              <User size={18} aria-hidden="true" />
+              <span>{displayName}</span>
+            </Link>
+            <button type="button" onClick={handleLogout} className="nav-logout">
+              <LogOut size={16} aria-hidden="true" />
+              <span>Logout</span>
+            </button>
+          </div>
+        ) : (
+          <div className="nav-actions">
+            <Link to="/login" className="btn-secondary nav-btn">Login</Link>
+            <Link to="/register" className="btn-primary nav-btn">Sign Up</Link>
+          </div>
+        )}
+      </div>
+    </header>
+  );
 }

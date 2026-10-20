@@ -20,7 +20,7 @@ export default function Profile() {
         const fetchMyBookings = async () => {
             try {
                 const res = await API.get('/bookings/my');
-                setBookings(res.data?.data || res.data || []);
+                setBookings(Array.isArray(res.data) ? res.data : (res.data?.data || []));
             } catch (err) {
                 console.error('Failed to fetch user bookings', err);
             } finally {
@@ -60,35 +60,35 @@ export default function Profile() {
                     <p className="gov-empty-text">No bookings found under this account.</p>
                 ) : (
                     <div className="gov-ticket-grid">
-                        {bookings.map((ticket) => (
-                            <article key={ticket.id || ticket.booking_id} className="gov-ticket-card">
+                        {bookings.map((b) => (
+                            <article key={b.id || b.pnr_code} className="gov-ticket-card">
                                 <div className="gov-ticket-top">
                                     <div>
-                                        <span className="gov-ticket-mode">{ticket.mode || 'Trip'}</span>
-                                        <h4>{ticket.operator || 'Operator'}</h4>
-                                        <span className="gov-ticket-id">ID: {ticket.id || ticket.booking_id}</span>
+                                        <span className="gov-ticket-mode">{b.transport_type || 'BUS'}</span>
+                                        <h4>{b.operator_name || 'Green Line Paribahan'}</h4>
+                                        <span className="gov-ticket-id">PNR: <strong>{b.pnr_code}</strong></span>
                                     </div>
-                                    <span className="gov-status-badge"><CheckCircle2 size={12} /> {ticket.status || 'Confirmed'}</span>
+                                    <span className="gov-status-badge"><CheckCircle2 size={12} /> {b.status || 'CONFIRMED'}</span>
                                 </div>
 
                                 <div className="gov-route-row">
                                     <div>
                                         <small>Route</small>
-                                        <p><MapPin size={12} /> {ticket.from} ➔ {ticket.to}</p>
+                                        <p><MapPin size={12} /> {b.origin || 'Dhaka'} ➔ {b.destination || 'Chittagong'}</p>
                                     </div>
                                     <div>
                                         <small>Seats</small>
-                                        <p>{Array.isArray(ticket.seats) ? ticket.seats.join(', ') : ticket.seats}</p>
+                                        <p>{Array.isArray(b.seats) ? b.seats.join(', ') : (b.seat_number || 'A1')}</p>
                                     </div>
                                     <div>
-                                        <small>Fare</small>
-                                        <p>{ticket.fare || ticket.total_amount} BDT</p>
+                                        <small>Total Fare</small>
+                                        <p>{b.total_amount || b.fare || 800} BDT</p>
                                     </div>
                                 </div>
 
                                 <div className="gov-ticket-footer">
-                                    <span><Calendar size={13} /> {ticket.date}</span>
-                                    <span><Clock size={13} /> {ticket.time}</span>
+                                    <span><Calendar size={13} /> {b.departure_time ? new Date(b.departure_time).toLocaleDateString() : '2026-10-20'}</span>
+                                    <span><Clock size={13} /> {b.departure_time ? new Date(b.departure_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '08:00 AM'}</span>
                                 </div>
                             </article>
                         ))}

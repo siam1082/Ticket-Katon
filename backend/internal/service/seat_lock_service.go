@@ -108,3 +108,29 @@ func (s *SeatLockService) IsSeatLocked(ctx context.Context, tripID, seatNumber s
 	}
 	return val != "", nil
 }
+
+// HeldSeats returns which of the given seats are currently locked in Redis.
+// It uses one MGET round trip instead of one call per seat.
+func (s *SeatLockService) HeldSeats(ctx context.Context, tripID string, seatNumbers []string) (map[string]bool, error) {
+	held := make(map[string]bool, len(seatNumbers))
+	if len(seatNumbers) == 0 {
+		return held, nil
+	}
+
+	keys := make([]string, len(seatNumbers))
+	for i, seat := range seatNumbers {
+		keys[i] = formatSeatKey(tripID, seat)
+	}
+
+	vals, err := s.rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return held, err
+	}
+
+	for i, v := range vals {
+		if v != nil {
+			held[seatNumbers[i]] = true
+		}
+	}
+	return held, nil
+}

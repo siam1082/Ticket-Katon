@@ -99,3 +99,12 @@ func (s *SeatLockService) ValidateHold(ctx context.Context, tripID string, seatN
 
 	return true, nil
 }
+
+func (s *SeatLockService) IsSeatLocked(ctx context.Context, tripID, seatNumber string) (bool, error) {
+	key := formatSeatKey(tripID, seatNumber)
+	val, err := s.rdb.Get(ctx, key).Result()
+	if err != nil {
+		return false, nil // key expired or not found
+	}
+	return val != "", nil
+}

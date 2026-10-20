@@ -8,6 +8,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Profile from './pages/Profile';
 import SearchResults from './pages/SearchResults';
+import SeatSelect from './pages/SeatSelect';
 import AdminDashboard from './pages/AdminDashboard';
 
 function Padded({ children }) {
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/search" element={<Padded><SearchResults /></Padded>} />
+            <Route path="/seat-select" element={<Padded><SeatSelect /></Padded>} />
             <Route path="/profile" element={<Padded><Profile /></Padded>} />
             <Route path="/admin" element={<Padded><AdminDashboard /></Padded>} />
           </Routes>

@@ -1,8 +1,86 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { CheckCircle2, AlertCircle, Clock, ShieldCheck, X, AlertTriangle, Info } from 'lucide-react';
 import API from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { CheckCircle2, AlertCircle, Clock, ShieldCheck, X, AlertTriangle } from 'lucide-react';
+import './SeatSelect.css';
+
+const GATEWAYS = [
+  { id: 'BKASH', label: 'bKash', color: '#e2136e' },
+  { id: 'NAGAD', label: 'Nagad', color: '#f7941d' },
+];
+
+const BUS_SEAT = /^[A-Z]\d+$/;
+
+const errText = (err, fallback) => err.response?.data?.error || fallback;
+
+const formatTimer = (s) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
+function Seat({ seat, selected, onPick }) {
+  const isAvailable = seat.status === 'AVAILABLE';
+  const isHeld = seat.status === 'HELD' || seat.status === 'LOCKED';
+
+  let state = 'booked';
+  if (selected) state = 'selected';
+  else if (isHeld) state = 'held';
+  else if (isAvailable) state = 'available';
+
+  const sub = state === 'held' ? 'Held' : state === 'booked' ? 'Booked' : `${seat.fare}৳`;
+
+  return (
+    <button
+      type="button"
+      className={`ss-seat ss-seat--${state}`}
+      disabled={!isAvailable}
+      aria-pressed={selected}
+      aria-label={`Seat ${seat.seat_number}, ${sub}`}
+      onClick={() => onPick(seat)}
+    >
+      <span className="ss-seat-no">{seat.seat_number}</span>
+      <span className="ss-seat-sub">{sub}</span>
+    </button>
+  );
+}
+
+function SeatGrid({ seats, selectedNo, onPick }) {
+  const render = (s) => (
+    <Seat key={s.seat_number} seat={s} selected={selectedNo === s.seat_number} onPick={onPick} />
+  );
+
+  // Bus coach: rows A..J, aisle in the middle (2 + 2).
+  if (seats.length > 0 && seats.every((s) => BUS_SEAT.test(s.seat_number))) {
+    const rows = {};
+    seats.forEach((s) => {
+      const letter = s.seat_number[0];
+      rows[letter] = rows[letter] || [];
+      rows[letter].push(s);
+    });
+
+    return (
+      <div className="ss-bus">
+        <div className="ss-bus-front">Front · Driver</div>
+        {Object.keys(rows)
+          .sort()
+          .map((letter) => {
+            const row = rows[letter].sort(
+              (a, b) => parseInt(a.seat_number.slice(1), 10) - parseInt(b.seat_number.slice(1), 10),
+            );
+            const half = Math.ceil(row.length / 2);
+            return (
+              <div key={letter} className="ss-bus-row">
+                {row.slice(0, half).map(render)}
+                <span className="ss-aisle" aria-hidden="true" />
+                {row.slice(half).map(render)}
+              </div>
+            );
+          })}
+      </div>
+    );
+  }
+
+  return <div className="ss-grid">{seats.map(render)}</div>;
+}
 
 export default function SeatSelect() {
   const [searchParams] = useSearchParams();
@@ -12,25 +90,28 @@ export default function SeatSelect() {
 
   const [loading, setLoading] = useState(true);
   const [layout, setLayout] = useState(null);
-  const [selectedSeat, setSelectedSeat] = useState(null);
-  const [selectedSeatFare, setSelectedSeatFare] = useState(0);
-  const [isHolding, setIsHolding] = useState(false);
-  const [bookingSuccess, setBookingSuccess] = useState(null);
+  const [selected, setSelected] = useState(null); // { seat_number, fare }
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  // Payment Modal States
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState('bkash');
-  const [walletNumber, setWalletNumber] = useState('');
-  const [pinNumber, setPinNumber] = useState('');
-  const [holdTimer, setHoldTimer] = useState(300); // 5 minutes TTL match
+  // Checkout state
+  const [modal, setModal] = useState(null); // null | 'details' | 'pay'
+  const [modalError, setModalError] = useState('');
+  const [gateway, setGateway] = useState('BKASH');
+  const [passenger, setPassenger] = useState({ name: '', phone: '', gender: 'MALE' });
+  const [payment, setPayment] = useState(null); // response of POST /payments/initiate
+  const [expiresAt, setExpiresAt] = useState(null);
+  const [remaining, setRemaining] = useState(0);
+  const [booking, setBooking] = useState(null); // confirmed booking
+  const expiredRef = useRef(false);
 
   const fetchSeats = useCallback(async () => {
     try {
       const res = await API.get(`/trips/${tripId}/seats`);
       setLayout(res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load seats');
+      setError(errText(err, 'Failed to load seats'));
     } finally {
       setLoading(false);
     }
@@ -44,381 +125,336 @@ export default function SeatSelect() {
     fetchSeats();
   }, [tripId, navigate, fetchSeats]);
 
-  // Modal Cancel korle instant Redis lock release kora
-  const handleClosePaymentModal = async () => {
-    try {
-      if (selectedSeat) {
-        await API.post('/seats/release', {
-          trip_id: tripId,
-          seat_numbers: [selectedSeat]
-        });
-      }
-    } catch (err) {
-      console.error('Failed to release seat lock', err);
-    } finally {
-      setShowPaymentModal(false);
-      setSelectedSeat(null);
-      setError('');
+  // Leave the checkout and show a message. The server has already released the seats
+  // (or we release them below), so we only refresh the seat map.
+  const resetCheckout = useCallback(
+    (message, isError = false) => {
+      setModal(null);
+      setModalError('');
+      setPayment(null);
+      setSelected(null);
+      setExpiresAt(null);
+      setNotice(isError ? '' : message || '');
+      setError(isError ? message || '' : '');
       fetchSeats();
-    }
-  };
+    },
+    [fetchSeats],
+  );
 
-  // Hold Timer logic (Synced with 5-minute Redis LockTTL)
+  // Close the checkout: cancel the pending payment, or just release the seat hold.
+  const closeCheckout = useCallback(
+    async (message) => {
+      setBusy(true);
+      try {
+        if (payment) {
+          await API.post(`/payments/${payment.payment_id}/simulate`, { result: 'cancel' });
+        } else if (selected) {
+          await API.post('/seats/release', { trip_id: tripId, seat_numbers: [selected.seat_number] });
+        }
+      } catch {
+        // The hold may already be gone; nothing else to do.
+      } finally {
+        setBusy(false);
+        resetCheckout(message);
+      }
+    },
+    [payment, selected, tripId, resetCheckout],
+  );
+
+  // Always call the latest closeCheckout from the timer without restarting it.
+  const closeRef = useRef(closeCheckout);
   useEffect(() => {
-    let timer;
-    if (showPaymentModal && holdTimer > 0) {
-      timer = setInterval(() => {
-        setHoldTimer((prev) => prev - 1);
-      }, 1000);
-    } else if (holdTimer === 0 && showPaymentModal) {
-      alert('Seat reservation expired! Please select your seat again.');
-      handleClosePaymentModal();
-    }
-    return () => clearInterval(timer);
-  }, [showPaymentModal, holdTimer]);
+    closeRef.current = closeCheckout;
+  }, [closeCheckout]);
+
+  // Countdown, driven by the expiry time the server gave us. The first tick runs
+  // immediately, so the timer never reads a stale "0" when the checkout opens.
+  useEffect(() => {
+    if (!modal || !expiresAt) return undefined;
+
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setRemaining(left);
+      if (left === 0 && !expiredRef.current) {
+        expiredRef.current = true;
+        closeRef.current('Your seat reservation expired. Please select your seat again.');
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [modal, expiresAt]);
 
   const handleSeatClick = (seat) => {
     if (seat.status !== 'AVAILABLE') return;
-    if (selectedSeat === seat.seat_number) {
-      setSelectedSeat(null);
-      setSelectedSeatFare(0);
-    } else {
-      setSelectedSeat(seat.seat_number);
-      setSelectedSeatFare(seat.fare || 800);
-    }
+    setNotice('');
     setError('');
+    setSelected((cur) => (cur?.seat_number === seat.seat_number ? null : { seat_number: seat.seat_number, fare: seat.fare }));
   };
 
-  const handleProceedToPayment = async () => {
+  // Step 1: hold the seat in Redis, then open the checkout.
+  const handleProceed = async () => {
     if (!isAuthenticated) {
-      alert('Please login to reserve seats and complete payment!');
       navigate('/login');
       return;
     }
+    if (!selected) return;
 
-    if (!selectedSeat) {
-      setError('Please choose a seat first');
-      return;
-    }
-
-    setIsHolding(true);
+    setBusy(true);
     setError('');
-
+    setNotice('');
     try {
-      const holdRes = await API.post('/seats/hold', {
-        trip_id: tripId,
-        seat_numbers: [selectedSeat]
+      const res = await API.post('/seats/hold', { trip_id: tripId, seat_numbers: [selected.seat_number] });
+      const seconds = res.data?.expires_in_seconds || 300;
+      setPassenger({
+        name: user?.full_name || user?.name || '',
+        phone: user?.phone || '',
+        gender: 'MALE',
       });
-
-      const expirySeconds = holdRes.data?.expires_in_seconds || 300;
-      setHoldTimer(expirySeconds);
-      setShowPaymentModal(true);
+      setModalError('');
+      expiredRef.current = false;
+      setExpiresAt(Date.now() + seconds * 1000);
+      setModal('details');
     } catch (err) {
-      setError(err.response?.data?.error || 'Could not lock seat. It might have just been taken.');
+      setError(errText(err, 'Could not hold this seat. It may have just been taken.'));
+      setSelected(null);
       fetchSeats();
     } finally {
-      setIsHolding(false);
+      setBusy(false);
     }
   };
 
-  const handleConfirmPayment = async (e) => {
+  // Step 2: the server creates a pending booking and works out the amount.
+  const handleInitiate = async (e) => {
     e.preventDefault();
-    if (!walletNumber || !pinNumber) {
-      alert('Please enter valid mobile wallet and PIN');
-      return;
-    }
-
-    setIsHolding(true);
-    setError('');
-
-    const demoTxnId = `DEMO-${paymentMethod.toUpperCase()}-${Math.floor(100000 + Math.random() * 900000)}`;
-
+    setBusy(true);
+    setModalError('');
     try {
-      const confirmRes = await API.post('/bookings/confirm', {
+      const res = await API.post('/payments/initiate', {
         trip_id: tripId,
-        seats: [selectedSeat],
-        passengers: [{
-          name: user?.name || "Passenger",
-          phone: walletNumber || user?.phone || "01700000000",
-          gender: "MALE",
-          seat_number: selectedSeat
-        }],
-        payment: {
-          gateway: paymentMethod.toUpperCase(),
-          transaction_id: demoTxnId
-        }
+        seats: [selected.seat_number],
+        passengers: [
+          {
+            name: passenger.name.trim(),
+            phone: passenger.phone.trim(),
+            gender: passenger.gender,
+            seat_number: selected.seat_number,
+          },
+        ],
+        gateway,
       });
-
-      setShowPaymentModal(false);
-      setBookingSuccess(confirmRes.data);
+      setPayment(res.data);
+      // Keep the countdown in step with the server's hold.
+      setExpiresAt(Date.now() + res.data.expires_in_seconds * 1000);
+      setModal('pay');
     } catch (err) {
-      setError(err.response?.data?.error || 'Payment confirmation failed or lock expired');
-      setShowPaymentModal(false);
-      fetchSeats();
+      const status = err.response?.status;
+      const message = errText(err, 'Could not start the demo payment.');
+      if (status === 409) resetCheckout(message, true);
+      else setModalError(message);
     } finally {
-      setIsHolding(false);
+      setBusy(false);
     }
   };
 
-  const formatTimer = (seconds) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  // Step 3: choose how the demo payment ends.
+  const handleSimulate = async (result) => {
+    setBusy(true);
+    setModalError('');
+    try {
+      const res = await API.post(`/payments/${payment.payment_id}/simulate`, { result });
+      if (result === 'success') {
+        setBooking(res.data.booking);
+        setModal(null);
+        setPayment(null);
+        setExpiresAt(null);
+      } else {
+        resetCheckout(res.data.message);
+      }
+    } catch (err) {
+      resetCheckout(errText(err, 'The demo payment could not be completed.'), true);
+    } finally {
+      setBusy(false);
+    }
   };
 
-  if (loading) return <p style={{ textAlign: 'center', padding: '60px' }}>Loading seat layout...</p>;
+  if (loading) return <p className="ss-loading">Loading seat layout...</p>;
 
-  // Group seats by Coach / Deck if available
-  const seatGroups = layout?.seats?.reduce((groups, seat) => {
-    const groupName = seat.deck_or_class || 'General';
-    if (!groups[groupName]) groups[groupName] = [];
-    groups[groupName].push(seat);
-    return groups;
-  }, {}) || {};
-
-  return (
-    <div style={{ maxWidth: '860px', margin: '20px auto', padding: '24px', background: '#fff', borderRadius: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}>
-      {bookingSuccess ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <CheckCircle2 size={64} color="#16a34a" style={{ margin: '0 auto 16px' }} />
-          <h2 style={{ fontSize: '24px', fontWeight: '800', color: '#16a34a' }}>Payment & Booking Confirmed!</h2>
-          <p style={{ marginTop: '8px', color: '#4b5563' }}>Transaction ID: <strong>{bookingSuccess.payment?.transaction_id || 'DEMO-TXN-SUCCESS'}</strong></p>
-          <div style={{ margin: '20px auto', display: 'inline-block', background: '#f0fdf4', border: '1px dashed #16a34a', padding: '12px 24px', borderRadius: '8px' }}>
-            <span style={{ fontSize: '14px', color: '#166534' }}>PNR Code: </span>
-            <strong style={{ fontSize: '20px', letterSpacing: '1px', color: '#15803d' }}>{bookingSuccess.pnr_code || bookingSuccess.pnr}</strong>
+  if (booking) {
+    return (
+      <div className="ss-page">
+        <div className="ss-success">
+          <CheckCircle2 size={56} aria-hidden="true" />
+          <h2>Demo booking confirmed</h2>
+          <p className="ss-muted">This is a simulated ticket. No real money was charged.</p>
+          <div className="ss-pnr">
+            <span>PNR</span>
+            <strong>{booking.pnr_code}</strong>
           </div>
-          <div>
-            <button onClick={() => navigate('/profile')} style={{ background: '#16a34a', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: '600', cursor: 'pointer', marginRight: '10px' }}>
-              View in My Bookings
-            </button>
-            <button onClick={() => navigate('/')} style={{ background: '#f3f4f6', color: '#374151', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: '600', cursor: 'pointer' }}>
-              Book Another
-            </button>
+          <ul className="ss-tickets">
+            {booking.tickets?.map((t) => (
+              <li key={t.id}>
+                <span>Seat {t.seat_number} · {t.passenger_name}</span>
+                <span className="ss-muted">{t.ticket_number}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="ss-total">Total: {booking.total_amount} BDT</p>
+          <div className="ss-actions">
+            <button type="button" className="btn-primary" onClick={() => navigate('/profile')}>View in My Bookings</button>
+            <button type="button" className="btn-secondary" onClick={() => navigate('/')}>Book another</button>
           </div>
         </div>
-      ) : (
-        <>
-          <h2 style={{ fontSize: '22px', fontWeight: '700', marginBottom: '6px' }}>Select Your Seat</h2>
-          <p style={{ color: '#6b7280', marginBottom: '20px' }}>
-            <strong>{layout?.operator_name}</strong> • Reg: {layout?.registration_no} • {layout?.transport_type}
-          </p>
+      </div>
+    );
+  }
 
-          {error && (
-            <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '12px', borderRadius: '8px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
+  const seatGroups =
+    layout?.seats?.reduce((groups, seat) => {
+      const name = seat.deck_or_class || 'General';
+      groups[name] = groups[name] || [];
+      groups[name].push(seat);
+      return groups;
+    }, {}) || {};
+  const groupCount = Object.keys(seatGroups).length;
+  const gw = GATEWAYS.find((g) => g.id === gateway);
 
-          {/* Seat Layout View (Supports Bus, Train Coach, and Launch Cabins) */}
-          {Object.entries(seatGroups).map(([groupTitle, seatsInGroup]) => (
-            <div key={groupTitle} style={{ marginBottom: '28px' }}>
-              {Object.keys(seatGroups).length > 1 && (
-                <h4 style={{ fontSize: '15px', fontWeight: '700', color: '#374151', borderBottom: '1px solid #e5e7eb', paddingBottom: '6px', marginBottom: '16px' }}>
-                  {groupTitle.replace('_', ' ')}
-                </h4>
-              )}
+  return (
+    <div className="ss-page">
+      <h2 className="ss-title">Select your seat</h2>
+      <p className="ss-muted">
+        <strong>{layout?.operator_name}</strong> · Reg: {layout?.registration_no} · {layout?.transport_type}
+      </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(68px, 1fr))', gap: '12px', padding: '16px', background: '#f9fafb', borderRadius: '12px' }}>
-                {seatsInGroup.map((s) => {
-                  const isAvailable = s.status === 'AVAILABLE';
-                  const isHeld = s.status === 'HELD' || s.status === 'LOCKED';
-                  const isSelected = selectedSeat === s.seat_number;
-
-                  let bg = '#ffffff';
-                  let color = '#1f2937';
-                  let border = '1px solid #d1d5db';
-
-                  if (isSelected) {
-                    bg = '#22c55e';
-                    color = '#ffffff';
-                    border = '2px solid #15803d';
-                  } else if (isHeld) {
-                    bg = '#fef08a';
-                    color = '#854d0e';
-                    border = '1px solid #eab308';
-                  } else if (!isAvailable) {
-                    bg = '#9ca3af';
-                    color = '#ffffff';
-                  }
-
-                  return (
-                    <button
-                      key={s.seat_number}
-                      disabled={!isAvailable}
-                      onClick={() => handleSeatClick(s)}
-                      style={{
-                        height: '54px',
-                        borderRadius: '8px',
-                        border: border,
-                        background: bg,
-                        color: color,
-                        fontWeight: '700',
-                        cursor: isAvailable ? 'pointer' : 'not-allowed',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        boxShadow: isSelected ? '0 0 10px rgba(34, 197, 94, 0.4)' : 'none',
-                        transition: 'all 0.15s'
-                      }}
-                    >
-                      <span style={{ fontSize: '13px' }}>{s.seat_number}</span>
-                      <span style={{ fontSize: '10px' }}>
-                        {isHeld ? 'Held' : !isAvailable ? 'Booked' : `${s.fare || 800}৳`}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-
-          {/* Legend Identifiers */}
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '20px', margin: '24px 0', fontSize: '13px', color: '#4b5563', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: '12px', height: '12px', background: '#ffffff', border: '1px solid #d1d5db', marginRight: '6px', borderRadius: '2px' }}></span> Available
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: '12px', height: '12px', background: '#22c55e', marginRight: '6px', borderRadius: '2px' }}></span> Selected
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: '12px', height: '12px', background: '#fef08a', border: '1px solid #eab308', marginRight: '6px', borderRadius: '2px' }}></span> In Payment / Held
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: '12px', height: '12px', background: '#9ca3af', marginRight: '6px', borderRadius: '2px' }}></span> Booked
-            </div>
-          </div>
-
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>Selected Seat:</p>
-              <h4 style={{ margin: 0, fontSize: '18px', fontWeight: '700' }}>{selectedSeat ? `${selectedSeat} (${selectedSeatFare} BDT)` : 'None'}</h4>
-            </div>
-            <button
-              onClick={handleProceedToPayment}
-              disabled={!selectedSeat || isHolding}
-              style={{
-                background: selectedSeat && !isHolding ? '#16a34a' : '#9ca3af',
-                color: '#fff',
-                border: 'none',
-                padding: '12px 28px',
-                borderRadius: '8px',
-                fontWeight: '700',
-                cursor: selectedSeat && !isHolding ? 'pointer' : 'not-allowed'
-              }}
-            >
-              {isHolding ? 'Holding Seat...' : 'Proceed to Payment'}
-            </button>
-          </div>
-        </>
+      {error && (
+        <div className="ss-alert ss-alert--error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" /> <span>{error}</span>
+        </div>
+      )}
+      {notice && (
+        <div className="ss-alert ss-alert--info" role="status">
+          <Info size={16} aria-hidden="true" /> <span>{notice}</span>
+        </div>
       )}
 
-      {/* Demo Payment Sandbox Modal */}
-      {showPaymentModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '430px', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
-            
-            <div style={{ background: paymentMethod === 'bkash' ? '#e2136e' : '#f7941d', padding: '16px 20px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      {Object.entries(seatGroups).map(([title, seats]) => (
+        <section key={title} className="ss-group">
+          {groupCount > 1 && <h4>{title.replace(/_/g, ' ')}</h4>}
+          <SeatGrid seats={seats} selectedNo={selected?.seat_number} onPick={handleSeatClick} />
+        </section>
+      ))}
+
+      <div className="ss-legend" aria-label="Seat legend">
+        <span><i className="ss-dot ss-dot--available" /> Available</span>
+        <span><i className="ss-dot ss-dot--selected" /> Selected</span>
+        <span><i className="ss-dot ss-dot--held" /> Held (someone is paying)</span>
+        <span><i className="ss-dot ss-dot--booked" /> Booked</span>
+      </div>
+
+      <div className="ss-bar">
+        <div>
+          <p className="ss-muted">Selected seat</p>
+          <h4>{selected ? `${selected.seat_number} · ${selected.fare} BDT` : 'None'}</h4>
+        </div>
+        <button type="button" className="btn-primary" onClick={handleProceed} disabled={!selected || busy}>
+          {busy && !modal ? 'Holding seat...' : 'Proceed to demo payment'}
+        </button>
+      </div>
+
+      {modal && (
+        <div className="ss-overlay" role="dialog" aria-modal="true" aria-label="Demo payment">
+          <div className="ss-modal">
+            <div className="ss-modal-head" style={{ background: gw.color }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>Demo Payment Gateway</h3>
-                <span style={{ fontSize: '12px', opacity: 0.9 }}>Ticket-Katon Secure Sandbox</span>
+                <h3>Demo payment</h3>
+                <span>Ticket-Katon sandbox · simulation only</span>
               </div>
-              <button onClick={handleClosePaymentModal} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }} title="Cancel and Release Seat">
+              <button type="button" onClick={() => closeCheckout('Checkout cancelled. Your seat was released.')} disabled={busy} aria-label="Cancel and release seat">
                 <X size={20} />
               </button>
             </div>
 
-            {/* Strict Sandbox Disclaimer */}
-            <div style={{ background: '#fffbeb', borderBottom: '1px solid #fef3c7', padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#b45309' }}>
-              <AlertTriangle size={16} style={{ flexShrink: 0 }} />
-              <span><strong>Simulation only:</strong> Do NOT enter your real wallet number or actual PIN.</span>
+            <div className="ss-modal-warn">
+              <AlertTriangle size={16} aria-hidden="true" />
+              <span><strong>Simulation only.</strong> Do not enter any real wallet number, PIN or card. None is asked for here.</span>
             </div>
 
-            {/* 5-Minute Reverse Countdown Timer */}
-            <div style={{ background: '#fef3c7', padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: '#92400e' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><Clock size={14} /> Reservation expires in:</span>
-              <strong>{formatTimer(holdTimer)}</strong>
+            <div className="ss-modal-timer">
+              <span><Clock size={14} aria-hidden="true" /> Reservation expires in</span>
+              <strong>{formatTimer(remaining)}</strong>
             </div>
 
-            {/* Gateway Selector */}
-            <div style={{ display: 'flex', padding: '16px 20px 0', gap: '10px' }}>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('bkash')}
-                style={{ flex: 1, padding: '10px', borderRadius: '8px', border: paymentMethod === 'bkash' ? '2px solid #e2136e' : '1px solid #e5e7eb', background: paymentMethod === 'bkash' ? '#fdf2f8' : '#fff', fontWeight: 'bold', color: paymentMethod === 'bkash' ? '#e2136e' : '#374151', cursor: 'pointer' }}
-              >
-                bKash
-              </button>
-              <button
-                type="button"
-                onClick={() => setPaymentMethod('nagad')}
-                style={{ flex: 1, padding: '10px', borderRadius: '8px', border: paymentMethod === 'nagad' ? '2px solid #f7941d' : '1px solid #e5e7eb', background: paymentMethod === 'nagad' ? '#fffbeb' : '#fff', fontWeight: 'bold', color: paymentMethod === 'nagad' ? '#f7941d' : '#374151', cursor: 'pointer' }}
-              >
-                Nagad
-              </button>
-            </div>
+            {modalError && <div className="ss-alert ss-alert--error ss-modal-alert" role="alert">{modalError}</div>}
 
-            <form onSubmit={handleConfirmPayment} style={{ padding: '20px' }}>
-              <div style={{ background: '#f9fafb', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', marginBottom: '6px' }}>
-                  <span style={{ color: '#6b7280' }}>Selected Seat:</span>
-                  <strong>{selectedSeat}</strong>
+            {modal === 'details' && (
+              <form onSubmit={handleInitiate} className="ss-modal-body">
+                <div className="ss-field-row">
+                  {GATEWAYS.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      className={gateway === g.id ? 'ss-gw ss-gw--on' : 'ss-gw'}
+                      style={gateway === g.id ? { borderColor: g.color, color: g.color } : undefined}
+                      onClick={() => setGateway(g.id)}
+                    >
+                      {g.label} (demo)
+                    </button>
+                  ))}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px' }}>
-                  <span style={{ color: '#6b7280' }}>Total Amount:</span>
-                  <strong style={{ color: '#111827' }}>{selectedSeatFare} BDT</strong>
+
+                <div className="ss-summary">
+                  <span>Seat</span><strong>{selected.seat_number}</strong>
+                  <span>Estimated fare</span><strong>{selected.fare} BDT</strong>
+                </div>
+                <p className="ss-hint">The final amount is calculated by the server.</p>
+
+                <label className="ss-label" htmlFor="pname">Passenger name</label>
+                <input id="pname" className="ss-input" value={passenger.name} onChange={(e) => setPassenger({ ...passenger, name: e.target.value })} required minLength={2} />
+
+                <div className="ss-two">
+                  <div>
+                    <label className="ss-label" htmlFor="pphone">Passenger mobile</label>
+                    <input id="pphone" className="ss-input" type="tel" placeholder="017XXXXXXXX" value={passenger.phone} onChange={(e) => setPassenger({ ...passenger, phone: e.target.value })} required />
+                  </div>
+                  <div>
+                    <label className="ss-label" htmlFor="pgender">Gender</label>
+                    <select id="pgender" className="ss-input" value={passenger.gender} onChange={(e) => setPassenger({ ...passenger, gender: e.target.value })}>
+                      <option value="MALE">Male</option>
+                      <option value="FEMALE">Female</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+                </div>
+
+                <button type="submit" className="ss-pay" style={{ background: gw.color }} disabled={busy}>
+                  {busy ? 'Starting...' : 'Continue to demo payment'}
+                </button>
+              </form>
+            )}
+
+            {modal === 'pay' && payment && (
+              <div className="ss-modal-body">
+                <div className="ss-summary">
+                  <span>Seat</span><strong>{selected.seat_number}</strong>
+                  <span>Gateway</span><strong>{payment.gateway} (demo)</strong>
+                  <span>Amount</span><strong>{payment.amount} {payment.currency}</strong>
+                </div>
+                <p className="ss-hint">Choose how this demo payment should end.</p>
+
+                <button type="button" className="ss-pay" style={{ background: '#16a34a' }} disabled={busy} onClick={() => handleSimulate('success')}>
+                  {busy ? 'Processing...' : 'Simulate successful payment'}
+                </button>
+                <div className="ss-two">
+                  <button type="button" className="btn-secondary" disabled={busy} onClick={() => handleSimulate('fail')}>Simulate failure</button>
+                  <button type="button" className="btn-secondary" disabled={busy} onClick={() => handleSimulate('cancel')}>Cancel payment</button>
                 </div>
               </div>
+            )}
 
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Demo {paymentMethod === 'bkash' ? 'bKash' : 'Nagad'} Number</label>
-                <input
-                  type="text"
-                  placeholder="017XXXXXXXX"
-                  value={walletNumber}
-                  onChange={(e) => setWalletNumber(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }}
-                  required
-                />
-              </div>
-
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px', color: '#374151' }}>Enter PIN (Simulation: any 4 digits)</label>
-                <input
-                  type="password"
-                  placeholder="••••"
-                  maxLength={5}
-                  value={pinNumber}
-                  onChange={(e) => setPinNumber(e.target.value)}
-                  style={{ width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '14px' }}
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                disabled={isHolding}
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  background: paymentMethod === 'bkash' ? '#e2136e' : '#f7941d',
-                  color: '#fff',
-                  fontWeight: 'bold',
-                  fontSize: '15px',
-                  cursor: isHolding ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {isHolding ? 'Processing Payment...' : `Confirm Pay ${selectedSeatFare} BDT`}
-              </button>
-
-              <div style={{ textAlign: 'center', marginTop: '12px', fontSize: '12px', color: '#6b7280', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                <ShieldCheck size={14} color="#16a34a" /> Demo Sandbox • No real currency will be charged
-              </div>
-            </form>
-
+            <div className="ss-modal-foot">
+              <ShieldCheck size={14} aria-hidden="true" /> Demo sandbox · no real currency is charged
+            </div>
           </div>
         </div>
       )}

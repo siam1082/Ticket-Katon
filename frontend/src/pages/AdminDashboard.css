@@ -1,207 +1,173 @@
-.govd-layout {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  background: var(--gov-bg);
-  color: var(--gov-dark);
+.ad {
+  display: grid;
+  gap: 20px;
 }
 
-.govd-header {
+.ad-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  background: linear-gradient(90deg, var(--gov-blue), var(--gov-accent));
-  color: #fff;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   padding: 14px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
 }
 
-.govd-brand {
+.ad-brand {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.govd-logo {
-  width: 56px;
-  height: 56px;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.12);
+.ad-brand strong {
+  display: block;
+  font-size: 17px;
+}
+
+.ad-brand span:last-child {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ad-logo {
   display: grid;
   place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
   font-weight: 800;
 }
 
-.govd-agency {
-  font-size: 15px;
+.ad-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ad-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: 12px;
   font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
-.govd-app {
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.govd-auth {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-}
-
-.govd-body {
-  display: flex;
-  gap: 20px;
-  max-width: 1200px;
-  width: calc(100% - 40px);
-  margin: 18px auto;
-}
-
-.govd-sidebar {
-  width: 240px;
-  background: #fff;
-  border: 1px solid var(--gov-border);
-  border-radius: 8px;
-  box-shadow: var(--gov-shadow);
-  padding: 12px;
-}
-
-.govd-sidebar ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.govd-sidebar li {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-radius: 6px;
-  color: var(--gov-muted);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.govd-sidebar li.active {
-  background: #eef6ff;
-  color: var(--gov-blue);
-  font-weight: 800;
-}
-
-.govd-main {
-  flex: 1;
-}
-
-.govd-breadcrumbs {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--gov-muted);
-  font-size: 13px;
-  margin-bottom: 12px;
-}
-
-.govd-breadcrumbs .sep {
-  color: #cbd5e1;
-}
-
-.card {
-  background: #fff;
-  border: 1px solid var(--gov-border);
-  border-radius: 8px;
-  box-shadow: var(--gov-shadow);
-  padding: 20px;
-}
-
-.card-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 10px;
-  color: var(--gov-dark);
-}
-
-.form-grid {
+.ad-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px;
+  grid-template-columns: 200px 1fr;
+  gap: 20px;
+  align-items: start;
 }
 
-.form-field {
+.ad-side {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
+.ad-side button {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  border: none;
-  padding: 0;
-  margin: 0;
-}
-
-.form-field label {
-  font-size: 13px;
-  font-weight: 700;
-  color: #374151;
-}
-
-.form-field input,
-.form-field select {
-  width: 100%;
-  border: 1px solid #dbeafe;
-  border-radius: 6px;
+  align-items: center;
+  gap: 8px;
   padding: 10px 12px;
-  background: #fff;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-2);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
 
-.form-field input:focus,
-.form-field select:focus {
-  outline: 2px solid rgba(11, 61, 145, 0.12);
-  border-color: var(--gov-blue);
+.ad-side button:hover {
+  background: #f1f5f9;
 }
 
-.form-actions {
+.ad-side button.on {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.ad-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.ad-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ad-alert--error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.ad-alert--ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.ad-form {
+  margin-top: 16px;
+}
+
+.ad-actions {
   grid-column: 1 / -1;
   display: flex;
   gap: 10px;
-  margin-top: 6px;
 }
 
-.btn-primary,
-.btn-secondary {
-  border: none;
-  border-radius: 6px;
-  padding: 10px 14px;
-  cursor: pointer;
-  font-weight: 800;
+.ad-table-wrap {
+  overflow-x: auto;
+  margin-top: 12px;
 }
 
-.btn-primary {
-  background: var(--gov-blue);
-  color: #fff;
+.ad-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
 }
 
-.btn-secondary {
-  background: #fff;
-  border: 1px solid #d1d5db;
-  color: #374151;
+.ad-table th,
+.ad-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
 }
 
-.govd-footer {
-  text-align: center;
-  color: var(--gov-muted);
-  font-size: 13px;
-  padding: 12px 20px 18px;
-  border-top: 1px solid #edf3ff;
-  margin-top: auto;
+.ad-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
 }
 
-@media (max-width: 900px) {
-  .govd-body {
-    flex-direction: column;
+@media (max-width: 720px) {
+  .ad-body {
+    grid-template-columns: 1fr;
   }
 
-  .govd-sidebar {
-    width: 100%;
+  .ad-side {
+    grid-auto-flow: column;
+    overflow-x: auto;
   }
 }

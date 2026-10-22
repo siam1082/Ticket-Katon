@@ -58,9 +58,11 @@ func bookingHandleError(w http.ResponseWriter, tag string, err error) {
 		bookingWriteError(w, http.StatusBadRequest, msg)
 	case errors.Is(err, domain.ErrHoldInvalid),
 		errors.Is(err, domain.ErrSeatsTaken),
-		errors.Is(err, domain.ErrPaymentDuplicate):
+		errors.Is(err, domain.ErrPaymentDuplicate),
+		errors.Is(err, domain.ErrPaymentProcessed):
 		bookingWriteError(w, http.StatusConflict, msg)
-	case errors.Is(err, domain.ErrBookingNotFound):
+	case errors.Is(err, domain.ErrBookingNotFound),
+		errors.Is(err, domain.ErrPaymentNotFound):
 		bookingWriteError(w, http.StatusNotFound, msg)
 	default:
 		log.Printf("[%s ERROR] %+v", tag, err)
@@ -149,7 +151,7 @@ func (h *BookingHandler) MyBookings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if bookings == nil {
-		bookings = []domain.Booking{}
+		bookings = []domain.BookingSummary{}
 	}
 	bookingWriteJSON(w, http.StatusOK, bookings)
 }

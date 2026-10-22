@@ -206,3 +206,86 @@ func (r *adminRepository) CreateTripWithSeats(
 	}
 	return tripID, nil
 }
+
+func (r *adminRepository) ListOperators(ctx context.Context, operatorID *string) ([]domain.AdminOperator, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, name, type::text FROM operators WHERE ($1::uuid IS NULL OR id = $1::uuid) ORDER BY name`,
+		operatorID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list operators: %w", err)
+	}
+	defer rows.Close()
+
+	operators := []domain.AdminOperator{}
+	for rows.Next() {
+		var o domain.AdminOperator
+		var otype string
+		if err := rows.Scan(&o.ID, &o.Name, &otype); err != nil {
+			return nil, fmt.Errorf("failed to scan operator: %w", err)
+		}
+		o.Type = domain.TransportType(otype)
+		operators = append(operators, o)
+	}
+	return operators, rows.Err()
+}
+
+func (r *adminRepository) GetOperator(ctx context.Context, operatorID string) (*domain.AdminOperator, error) {
+	var o domain.AdminOperator
+	var otype string
+	err := r.db.QueryRow(ctx, `SELECT id, name, type::text FROM operators WHERE id = $1`, operatorID).
+		Scan(&o.ID, &o.Name, &otype)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &pgErr) && pgErr.Code == "22P02") {
+			return nil, repository.ErrReferenceNotFound
+		}
+		return nil, fmt.Errorf("failed to load operator: %w", err)
+	}
+	o.Type = domain.TransportType(otype)
+	return &o, nil
+}
+
+func (r *adminRepository) CreateRoute(ctx context.Context, origin, destination string) (*domain.AdminRoute, error) {
+	var rt domain.AdminRoute
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO routes (origin_city, destination_city)
+		SELECT $1::text, $2::text
+		WHERE NOT EXISTS (
+			SELECT 1 FROM routes
+			WHERE lower(origin_city) = lower($1::text) AND lower(destination_city) = lower($2::text)
+		)
+		RETURNING id, origin_city, destination_city`, origin, destination).
+		Scan(&rt.ID, &rt.OriginCity, &rt.DestinationCity)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrAlreadyExists
+		}
+		return nil, fmt.Errorf("failed to create route: %w", err)
+	}
+	return &rt, nil
+}
+
+func (r *adminRepository) CreateVehicle(
+	ctx context.Context,
+	operatorID, registrationNo string,
+	vtype domain.TransportType,
+	layoutJSON string,
+) (string, error) {
+	var id string
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO vehicles (operator_id, registration_no, type, seat_layout_config)
+		SELECT $1::uuid, $2::text, $3::text::transport_type, $4::jsonb
+		WHERE NOT EXISTS (SELECT 1 FROM vehicles WHERE lower(registration_no) = lower($2::text))
+		RETURNING id`, operatorID, registrationNo, string(vtype), layoutJSON).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", repository.ErrAlreadyExists
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return "", repository.ErrReferenceNotFound
+		}
+		return "", fmt.Errorf("failed to create vehicle: %w", err)
+	}
+	return id, nil
+}

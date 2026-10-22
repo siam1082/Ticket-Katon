@@ -1,195 +1,295 @@
-.gov-profile-shell {
-  width: min(100% - 32px, 1100px);
-  margin: 32px auto 48px;
-  color: #172033;
-}
-
-.gov-profile-header {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 24px;
-  border-radius: 10px;
-  background: linear-gradient(110deg, #0b3d91, #0b5bd3);
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(11, 61, 145, 0.16);
-}
-
-.gov-avatar {
+.pf {
   display: grid;
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.16);
+  gap: 20px;
 }
 
-.gov-profile-meta h2 {
-  margin: 0 0 10px;
-  font-size: 24px;
-}
-
-.gov-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.gov-detail-pill,
-.gov-role-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 13px;
-}
-
-.gov-profile-card {
-  margin-top: 22px;
-  padding: 24px;
-  border: 1px solid #e2eaf5;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
-}
-
-.gov-section-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 18px;
-  color: #0b3d91;
-}
-
-.gov-section-header h3 {
-  margin: 0;
-  color: #172033;
-  font-size: 19px;
-}
-
-.gov-empty-text {
-  margin: 0;
-  padding: 28px 12px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 8px;
-  color: #64748b;
+.pf-state {
+  padding: 60px;
   text-align: center;
+  color: var(--muted);
 }
 
-.gov-ticket-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  gap: 16px;
+.pf-error {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
 }
 
-.gov-ticket-card {
-  min-width: 0;
-  padding: 18px;
-  border: 1px solid #e2eaf5;
-  border-radius: 8px;
-  background: #fbfdff;
+.pf-card {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
 }
 
-.gov-ticket-top {
+.pf-card h3 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+/* ---------- header ---------- */
+.pf-head {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid #e8eef6;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
-.gov-ticket-mode {
-  color: #0b5bd3;
+.pf-avatar {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.pf-who {
+  flex: 1;
+  min-width: 180px;
+}
+
+.pf-who h2 {
+  margin: 0 0 2px;
+  font-size: 20px;
+}
+
+.pf-who p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.pf-role {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.gov-ticket-top h4 {
-  margin: 4px 0;
-  font-size: 17px;
-}
-
-.gov-ticket-id {
-  color: #64748b;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-
-.gov-status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: #e9f8ef;
-  color: #18733b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.gov-route-row {
+/* ---------- ticket cards ---------- */
+.pf-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding: 16px 0;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 4px;
 }
 
-.gov-route-row small {
-  color: #64748b;
-  font-size: 12px;
+.pf-ticket {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--tc, var(--primary));
+  border-radius: 12px;
+  background: #fbfdff;
 }
 
-.gov-route-row p {
+.pf-ticket-head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 5px 0 0;
-  font-size: 13px;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-.gov-ticket-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding-top: 12px;
-  border-top: 1px solid #e8eef6;
-  color: #64748b;
-  font-size: 13px;
-}
-
-.gov-ticket-footer span {
+.pf-type {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  color: var(--tc);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
-@media (max-width: 560px) {
-  .gov-profile-shell {
-    width: min(100% - 20px, 1100px);
-    margin-top: 18px;
+.pf-status {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pf-status--confirmed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.pf-status--cancelled {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.pf-status--refunded {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.pf-ticket h4 {
+  margin: 0 0 2px;
+  font-size: 17px;
+}
+
+.pf-pnr {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.pf-pnr strong {
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+}
+
+.pf-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid var(--line);
+  font-size: 14px;
+}
+
+.pf-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.pf-facts dt {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.pf-facts dd {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.pf-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.pf-when span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pf-ticket-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pf-demo {
+  font-size: 11px;
+  color: var(--amber);
+  font-weight: 700;
+}
+
+.pf-print {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pf-print:hover {
+  background: #f1f5f9;
+}
+
+.pf-empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.pf-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary-dark);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.pf-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.pf-toggle .flip {
+  transform: rotate(180deg);
+}
+
+/* ---------- print: only the ticket that was clicked ---------- */
+@media print {
+  body * {
+    visibility: hidden;
   }
 
-  .gov-profile-header,
-  .gov-profile-card {
-    padding: 18px;
+  .pf-ticket.printing,
+  .pf-ticket.printing * {
+    visibility: visible;
   }
 
-  .gov-route-row {
-    grid-template-columns: 1fr;
-    gap: 10px;
+  .pf-ticket.printing {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: none;
   }
 
-  .gov-ticket-top {
-    flex-direction: column;
+  .pf-print {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .pf-facts {
+    grid-template-columns: 1fr 1fr;
   }
 }

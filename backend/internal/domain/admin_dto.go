@@ -53,3 +53,32 @@ type SeatSpec struct {
 	DeckOrClass string
 	Fare        float64
 }
+
+type AdminOperator struct {
+	ID   string        `json:"id"`
+	Name string        `json:"name"`
+	Type TransportType `json:"type"`
+}
+
+type CreateRouteRequest struct {
+	OriginCity      string `json:"origin_city"`
+	DestinationCity string `json:"destination_city"`
+}
+
+// CoachConfig describes one train coach.
+type CoachConfig struct {
+	CoachName  string `json:"coach_name"`
+	Class      string `json:"class"`  // SNIGDHA or SHOVON_CHAIR
+	Layout     string `json:"layout"` // 2x2 or 2x3 (display only)
+	TotalSeats int    `json:"total_seats"`
+}
+
+// CreateVehicleRequest: the operator admin's own operator is used automatically;
+// a super admin must send operator_id. The vehicle type must match the operator's type.
+type CreateVehicleRequest struct {
+	OperatorID     string        `json:"operator_id"`
+	RegistrationNo string        `json:"registration_no"`
+	Type           TransportType `json:"type"`
+	BusLayout      string        `json:"bus_layout"` // BUS only: 2x2 or 2x1
+	Coaches        []CoachConfig `json:"coaches"`    // TRAIN only
+}

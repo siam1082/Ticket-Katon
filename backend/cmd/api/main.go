@@ -145,6 +145,9 @@ func main() {
 				sales.Get("/routes", adminTripHdl.ListRoutes)
 				sales.Get("/trips", adminTripHdl.ListTrips)
 				sales.Post("/trips", adminTripHdl.CreateTrip)
+				sales.Get("/operators", adminTripHdl.ListOperators)
+				sales.Post("/routes", adminTripHdl.CreateRoute)
+				sales.Post("/vehicles", adminTripHdl.CreateVehicle)
 			})
 
 			// Super Admin Only (Platform DevOps / Software Engineers)

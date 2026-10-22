@@ -30,7 +30,13 @@ const (
 type BookingService interface {
 	ConfirmBooking(ctx context.Context, userID string, req *domain.ConfirmBookingRequest) (*domain.ConfirmBookingResponse, error)
 	GetBookingByPNR(ctx context.Context, pnr string) (*domain.Booking, []domain.Ticket, error)
-	GetUserBookings(ctx context.Context, userID string) ([]domain.Booking, error)
+	GetUserBookings(ctx context.Context, userID string) ([]domain.BookingSummary, error)
+
+	// Demo payment lifecycle (server-side simulation, no real money).
+	InitiatePayment(ctx context.Context, userID string, req *domain.InitiatePaymentRequest) (*domain.InitiatePaymentResponse, error)
+	SimulatePayment(ctx context.Context, userID, paymentID, result string) (*domain.SimulatePaymentResponse, error)
+	GetPayment(ctx context.Context, userID, paymentID string) (*domain.SimulatePaymentResponse, error)
+	StartPendingExpiryWorker(ctx context.Context)
 }
 
 type bookingService struct {
@@ -126,31 +132,37 @@ func validateConfirmRequest(req *domain.ConfirmBookingRequest) error {
 }
 
 // verifyHolds makes sure every seat is held by this user and the hold won't expire imminently.
-func (s *bookingService) verifyHolds(ctx context.Context, tripID, userID string, seats []string) error {
+// It returns the shortest remaining hold time across the seats (0 if Redis reports no expiry).
+func (s *bookingService) verifyHolds(ctx context.Context, tripID, userID string, seats []string) (time.Duration, error) {
+	var shortest time.Duration
+
 	for _, seat := range seats {
 		key := seatHoldKey(tripID, seat)
 
 		heldBy, err := s.redisClient.Get(ctx, key).Result()
 		if err == redis.Nil {
-			return domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
+			return 0, domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
 		}
 		if err != nil {
-			return fmt.Errorf("failed to verify seat hold: %w", err)
+			return 0, fmt.Errorf("failed to verify seat hold: %w", err)
 		}
 		if heldBy != userID {
-			return domain.NewBookingError(domain.ErrHoldInvalid, "seat %s is held by another user", seat)
+			return 0, domain.NewBookingError(domain.ErrHoldInvalid, "seat %s is held by another user", seat)
 		}
 
 		ttl, err := s.redisClient.TTL(ctx, key).Result()
 		if err != nil {
-			return fmt.Errorf("failed to verify seat hold: %w", err)
+			return 0, fmt.Errorf("failed to verify seat hold: %w", err)
 		}
 		// -2: key vanished between GET and TTL. -1: no expiry set (fine).
 		if ttl == -2 || (ttl >= 0 && ttl < minHoldTTL) {
-			return domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
+			return 0, domain.NewBookingError(domain.ErrHoldInvalid, "hold on seat %s has expired", seat)
+		}
+		if ttl >= 0 && (shortest == 0 || ttl < shortest) {
+			shortest = ttl
 		}
 	}
-	return nil
+	return shortest, nil
 }
 
 func (s *bookingService) ConfirmBooking(
@@ -164,7 +176,7 @@ func (s *bookingService) ConfirmBooking(
 	}
 
 	// 1. Redis seat hold validation
-	if err := s.verifyHolds(ctx, req.TripID, userID, req.Seats); err != nil {
+	if _, err := s.verifyHolds(ctx, req.TripID, userID, req.Seats); err != nil {
 		return nil, err
 	}
 
@@ -172,7 +184,7 @@ func (s *bookingService) ConfirmBooking(
 	totalAmount, err := s.bookingRepo.GetSeatsFare(ctx, req.TripID, req.Seats)
 	if err != nil {
 		if errors.Is(err, repository.ErrSeatsUnavailable) {
-			return nil, domain.NewBookingError(domain.ErrBookingInvalid, "one or more seats are invalid for this trip")
+			return nil, domain.NewBookingError(domain.ErrSeatsTaken, "one or more seats are not available (already booked, unknown, or the trip has departed)")
 		}
 		return nil, fmt.Errorf("failed to fetch seat fares: %w", err)
 	}
@@ -270,6 +282,6 @@ func (s *bookingService) GetBookingByPNR(ctx context.Context, pnr string) (*doma
 	return s.bookingRepo.GetBookingByPNR(ctx, pnr)
 }
 
-func (s *bookingService) GetUserBookings(ctx context.Context, userID string) ([]domain.Booking, error) {
+func (s *bookingService) GetUserBookings(ctx context.Context, userID string) ([]domain.BookingSummary, error) {
 	return s.bookingRepo.GetBookingsByUserID(ctx, userID)
 }

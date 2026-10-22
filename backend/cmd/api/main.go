@@ -46,22 +46,29 @@ func main() {
 	tokenMaker := token.NewTokenMaker(cfg.JWTSecret)
 	userRepo := postgres.NewPostgresUserRepository(pgPool)
 	tripRepo := postgres.NewPostgresTripRepository(pgPool)
+	bookingRepo := postgres.NewBookingRepository(pgPool)
+	adminRepo := postgres.NewAdminRepository(pgPool)
 
-	// 3. Services
+	// 3. Services & Workers
 	healthSvc := service.NewHealthService(pgPool, redisClient)
 	authSvc := service.NewAuthService(userRepo, tokenMaker)
 	seatLockSvc := service.NewSeatLockService(redisClient)
 	tripSvc := service.NewTripService(tripRepo, seatLockSvc)
-	bookingRepo := postgres.NewBookingRepository(pgPool)
 	bookingSvc := service.NewBookingService(bookingRepo, redisClient)
+	adminSvc := service.NewAdminService(adminRepo)
+
+	// Start pending booking expiry worker
+	bookingSvc.StartPendingExpiryWorker(ctx)
 
 	// 4. Handlers
 	healthHdl := httpHandler.NewHealthHandler(healthSvc)
 	authHdl := httpHandler.NewAuthHandler(authSvc)
 	tripHdl := httpHandler.NewTripHandler(tripSvc)
 	seatLockHdl := httpHandler.NewSeatLockHandler(seatLockSvc)
-	adminHdl := httpHandler.NewAdminHandler()
 	bookingHdl := httpHandler.NewBookingHandler(bookingSvc)
+	adminTripHdl := httpHandler.NewAdminTripHandler(adminSvc)
+	paymentHdl := httpHandler.NewPaymentHandler(bookingSvc)
+	adminHdl := httpHandler.NewAdminHandler()
 
 	// 5. Router Setup
 	r := chi.NewRouter()
@@ -116,6 +123,14 @@ func main() {
 			b.Get("/{pnr}", bookingHdl.GetByPNR)
 		})
 
+		// Server-Side Payment Routes (Protected with JWT)
+		api.Route("/payments", func(p chi.Router) {
+			p.Use(middleware.AuthMiddleware(tokenMaker))
+			p.Post("/initiate", paymentHdl.Initiate)
+			p.Get("/{paymentID}", paymentHdl.Get)
+			p.Post("/{paymentID}/simulate", paymentHdl.Simulate)
+		})
+
 		// Admin & Counter Sales Routes (Protected with JWT & RBAC)
 		api.Route("/admin", func(admin chi.Router) {
 			admin.Use(middleware.AuthMiddleware(tokenMaker))
@@ -124,13 +139,17 @@ func main() {
 			admin.Group(func(sales chi.Router) {
 				sales.Use(middleware.RequireRole(domain.RoleOperatorAdmin, domain.RoleSuperAdmin))
 				sales.Post("/tickets/issue", adminHdl.IssueCounterTicket)
-				sales.Post("/trips", adminHdl.CreateTripSchedule)
+
+				// Updated Dynamic Admin Trip Routes
+				sales.Get("/vehicles", adminTripHdl.ListVehicles)
+				sales.Get("/routes", adminTripHdl.ListRoutes)
+				sales.Get("/trips", adminTripHdl.ListTrips)
+				sales.Post("/trips", adminTripHdl.CreateTrip)
 			})
 
 			// Super Admin Only (Platform DevOps / Software Engineers)
 			admin.Group(func(super chi.Router) {
 				super.Use(middleware.RequireRole(domain.RoleSuperAdmin))
-				// Platform-wide configs, operator onboarding, audit logs
 			})
 		})
 	})

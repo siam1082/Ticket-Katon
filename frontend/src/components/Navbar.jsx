@@ -1,5 +1,5 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { Bus, Train, Ship, User, LogOut, Ticket } from 'lucide-react';
+import { Bus, Train, Ship, User, LogOut, Ticket, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
@@ -10,7 +10,7 @@ const SERVICES = [
 ];
 
 export default function Navbar() {
-  const { isAuthenticated, user, logout } = useAuth();
+  const { isAuthenticated, user, role, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -41,6 +41,12 @@ export default function Navbar() {
 
         {isAuthenticated ? (
           <div className="nav-actions">
+            {role === 'admin' && (
+              <Link to="/admin" className="nav-profile">
+                <ShieldCheck size={18} aria-hidden="true" />
+                <span>Admin</span>
+              </Link>
+            )}
             <Link to="/profile" className="nav-profile">
               <User size={18} aria-hidden="true" />
               <span>{displayName}</span>

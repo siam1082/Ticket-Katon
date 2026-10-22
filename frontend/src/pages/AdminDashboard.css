@@ -171,3 +171,37 @@
     overflow-x: auto;
   }
 }
+
+.ad-wide {
+  grid-column: 1 / -1;
+}
+
+.ad-coach-title {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.ad-coach {
+  display: grid;
+  grid-template-columns: 90px 1.2fr 1fr 90px auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ad-coach input,
+.ad-coach select {
+  height: 40px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+@media (max-width: 560px) {
+  .ad-coach {
+    grid-template-columns: 1fr 1fr;
+  }
+}

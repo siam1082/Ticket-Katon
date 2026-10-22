@@ -99,3 +99,68 @@ func (h *AdminTripHandler) CreateTrip(w http.ResponseWriter, r *http.Request) {
 	}
 	bookingWriteJSON(w, http.StatusCreated, resp)
 }
+
+// ListOperators handles GET /api/v1/admin/operators
+func (h *AdminTripHandler) ListOperators(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	operators, err := h.svc.ListOperators(r.Context(), claims.UserID, claims.Role)
+	if err != nil {
+		adminHandleError(w, "ADMIN OPERATORS", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusOK, operators)
+}
+
+// CreateRoute handles POST /api/v1/admin/routes
+// Body: {"origin_city","destination_city"}
+func (h *AdminTripHandler) CreateRoute(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+
+	var req domain.CreateRouteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		bookingWriteError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	route, err := h.svc.CreateRoute(r.Context(), claims.UserID, claims.Role, &req)
+	if err != nil {
+		adminHandleError(w, "ADMIN CREATE ROUTE", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusCreated, route)
+}
+
+// CreateVehicle handles POST /api/v1/admin/vehicles
+// Body: {"operator_id"?,"registration_no","type","bus_layout"?,"coaches"?}
+func (h *AdminTripHandler) CreateVehicle(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<16)
+
+	var req domain.CreateVehicleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		bookingWriteError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	vehicle, err := h.svc.CreateVehicle(r.Context(), claims.UserID, claims.Role, &req)
+	if err != nil {
+		adminHandleError(w, "ADMIN CREATE VEHICLE", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusCreated, vehicle)
+}

@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
@@ -224,4 +227,183 @@ func buildSeatPlan(vtype domain.TransportType, layout map[string]any, baseFare f
 	}
 
 	return nil, fmt.Errorf("trips for %s vehicles are not supported in this demo", vtype)
+}
+
+var (
+	spacesRe    = regexp.MustCompile(`\s+`)
+	cityRe      = regexp.MustCompile(`^\p{L}[\p{L} .'\-]*$`)
+	regNoRe     = regexp.MustCompile(`^[A-Z0-9][A-Z0-9 \-./]{2,29}$`)
+	coachNameRe = regexp.MustCompile(`^[A-Z]{1,4}$`)
+)
+
+func cleanSpaces(s string) string {
+	return spacesRe.ReplaceAllString(strings.TrimSpace(s), " ")
+}
+
+func (s *AdminService) ListOperators(ctx context.Context, userID string, role domain.UserRole) ([]domain.AdminOperator, error) {
+	scope, err := s.scopeOperator(ctx, userID, role)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListOperators(ctx, scope)
+}
+
+// CreateRoute adds a route. Routes are shared by all operators, so both admin roles may add them.
+func (s *AdminService) CreateRoute(
+	ctx context.Context,
+	userID string,
+	role domain.UserRole,
+	req *domain.CreateRouteRequest,
+) (*domain.AdminRoute, error) {
+	if _, err := s.scopeOperator(ctx, userID, role); err != nil {
+		return nil, err
+	}
+
+	origin := cleanSpaces(req.OriginCity)
+	destination := cleanSpaces(req.DestinationCity)
+	for _, city := range []string{origin, destination} {
+		if n := utf8.RuneCountInString(city); n < 2 || n > 60 || !cityRe.MatchString(city) {
+			return nil, &ValidationError{"city names must be 2 to 60 letters (spaces, dots, hyphens and apostrophes are allowed)"}
+		}
+	}
+	if strings.EqualFold(origin, destination) {
+		return nil, &ValidationError{"origin and destination cannot be the same"}
+	}
+
+	route, err := s.repo.CreateRoute(ctx, origin, destination)
+	if err != nil {
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, fmt.Errorf("%w: this route already exists", ErrAdminConflict)
+		}
+		return nil, err
+	}
+	return route, nil
+}
+
+// buildLayoutConfig turns the request into the JSON stored in vehicles.seat_layout_config.
+// The shapes match what buildSeatPlan (and backend/scripts/seed.sql) use.
+func buildLayoutConfig(req *domain.CreateVehicleRequest) (map[string]any, error) {
+	switch req.Type {
+	case domain.TransportBus:
+		layout := strings.TrimSpace(req.BusLayout)
+		if layout == "" {
+			layout = "2x2"
+		}
+		if layout != "2x2" && layout != "2x1" {
+			return nil, errors.New("bus layout must be 2x2 or 2x1")
+		}
+		return map[string]any{"type": layout}, nil
+
+	case domain.TransportLaunch:
+		return map[string]any{"type": "cabin_and_deck"}, nil
+
+	case domain.TransportTrain:
+		if len(req.Coaches) < 1 || len(req.Coaches) > 12 {
+			return nil, errors.New("a train needs between 1 and 12 coaches")
+		}
+		seen := map[string]bool{}
+		coaches := make([]any, 0, len(req.Coaches))
+		for _, c := range req.Coaches {
+			name := strings.ToUpper(strings.TrimSpace(c.CoachName))
+			if !coachNameRe.MatchString(name) {
+				return nil, errors.New("coach names must be 1 to 4 letters, like KA or KHA")
+			}
+			if seen[name] {
+				return nil, fmt.Errorf("coach %s is listed twice", name)
+			}
+			seen[name] = true
+
+			class := strings.ToUpper(strings.TrimSpace(c.Class))
+			if class != "SNIGDHA" && class != "SHOVON_CHAIR" {
+				return nil, errors.New("coach class must be SNIGDHA or SHOVON_CHAIR")
+			}
+			layout := strings.TrimSpace(c.Layout)
+			if layout == "" {
+				layout = "2x2"
+			}
+			if layout != "2x2" && layout != "2x3" {
+				return nil, errors.New("coach layout must be 2x2 or 2x3")
+			}
+			if c.TotalSeats < 1 || c.TotalSeats > 120 {
+				return nil, errors.New("each coach needs between 1 and 120 seats")
+			}
+			coaches = append(coaches, map[string]any{
+				"coach_name":  name,
+				"class":       class,
+				"layout":      layout,
+				"total_seats": float64(c.TotalSeats),
+			})
+		}
+		return map[string]any{"coaches": coaches}, nil
+	}
+
+	return nil, fmt.Errorf("vehicles of type %q are not supported in this demo", req.Type)
+}
+
+// CreateVehicle adds a bus, launch or train for an operator. An operator admin can only add
+// vehicles to their own operator, and the vehicle type must match the operator's type.
+func (s *AdminService) CreateVehicle(
+	ctx context.Context,
+	userID string,
+	role domain.UserRole,
+	req *domain.CreateVehicleRequest,
+) (*domain.AdminVehicle, error) {
+	scope, err := s.scopeOperator(ctx, userID, role)
+	if err != nil {
+		return nil, err
+	}
+
+	operatorID := strings.TrimSpace(req.OperatorID)
+	if scope != nil {
+		if operatorID != "" && operatorID != *scope {
+			return nil, ErrAdminForbidden
+		}
+		operatorID = *scope
+	}
+	if operatorID == "" {
+		return nil, &ValidationError{"operator_id is required"}
+	}
+
+	registrationNo := strings.ToUpper(cleanSpaces(req.RegistrationNo))
+	if !regNoRe.MatchString(registrationNo) {
+		return nil, &ValidationError{"registration number must be 3 to 30 characters (letters, digits, space, - . /)"}
+	}
+
+	operator, err := s.repo.GetOperator(ctx, operatorID)
+	if err != nil {
+		if errors.Is(err, repository.ErrReferenceNotFound) {
+			return nil, &ValidationError{"selected operator does not exist"}
+		}
+		return nil, err
+	}
+	if req.Type != operator.Type {
+		return nil, &ValidationError{fmt.Sprintf("%s runs %s services, so it can only have %s vehicles",
+			operator.Name, operator.Type, operator.Type)}
+	}
+
+	layout, err := buildLayoutConfig(req)
+	if err != nil {
+		return nil, &ValidationError{err.Error()}
+	}
+	// Make sure trips can be created from this layout later.
+	if _, err := buildSeatPlan(req.Type, layout, 1); err != nil {
+		return nil, &ValidationError{err.Error()}
+	}
+	layoutJSON, err := json.Marshal(layout)
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := s.repo.CreateVehicle(ctx, operator.ID, registrationNo, req.Type, string(layoutJSON))
+	if err != nil {
+		switch {
+		case errors.Is(err, repository.ErrAlreadyExists):
+			return nil, fmt.Errorf("%w: a vehicle with this registration number already exists", ErrAdminConflict)
+		case errors.Is(err, repository.ErrReferenceNotFound):
+			return nil, &ValidationError{"selected operator does not exist"}
+		}
+		return nil, err
+	}
+
+	return s.repo.GetVehicle(ctx, id)
 }

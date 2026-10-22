@@ -38,10 +38,16 @@ func mapUniqueViolation(err error) error {
 }
 
 func (r *bookingRepository) GetSeatsFare(ctx context.Context, tripID string, seatNumbers []string) (float64, error) {
+	// Only seats that are still sellable: not booked, trip scheduled and not yet departed.
 	query := `
-		SELECT COALESCE(SUM(fare), 0), COUNT(*)
-		FROM trip_seat_inventory
-		WHERE trip_id = $1 AND seat_number = ANY($2)
+		SELECT COALESCE(SUM(s.fare), 0), COUNT(*)
+		FROM trip_seat_inventory s
+		JOIN trips t ON t.id = s.trip_id
+		WHERE s.trip_id = $1
+		  AND s.seat_number = ANY($2)
+		  AND s.status <> 'BOOKED'
+		  AND t.status = 'SCHEDULED'
+		  AND t.departure_time > NOW()
 	`
 	var totalFare float64
 	var found int
@@ -219,12 +225,35 @@ func (r *bookingRepository) GetBookingByPNR(ctx context.Context, pnr string) (*d
 	return booking, tickets, nil
 }
 
-func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID string) ([]domain.Booking, error) {
+func splitSeats(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	return strings.Split(s, ",")
+}
+
+// GetBookingsByUserID lists the user's paid bookings with their trip details.
+// Bookings whose payment never succeeded (failed, cancelled, expired) are not tickets
+// and are left out.
+func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID string) ([]domain.BookingSummary, error) {
 	query := `
-		SELECT id, user_id, trip_id, pnr_code, total_amount, discount_amount, status, created_at, updated_at
-		FROM bookings
-		WHERE user_id = $1
-		ORDER BY created_at DESC
+		SELECT b.id, b.user_id, b.trip_id, b.pnr_code, b.total_amount, COALESCE(b.discount_amount, 0), b.status::text,
+		       COALESCE(b.created_at, NOW()), COALESCE(b.updated_at, NOW()),
+		       v.type::text, o.name, v.registration_no, rt.origin_city, rt.destination_city,
+		       t.departure_time, t.arrival_time,
+		       COALESCE((SELECT string_agg(tk.seat_number, ',' ORDER BY tk.seat_number)
+		                 FROM tickets tk WHERE tk.booking_id = b.id), ''),
+		       COALESCE((SELECT p.status::text FROM payments p
+		                 WHERE p.booking_id = b.id AND p.status IN ('SUCCESS', 'REFUNDED')
+		                 ORDER BY p.created_at DESC NULLS LAST LIMIT 1), '')
+		FROM bookings b
+		JOIN trips t ON t.id = b.trip_id
+		JOIN vehicles v ON v.id = t.vehicle_id
+		JOIN operators o ON o.id = v.operator_id
+		JOIN routes rt ON rt.id = t.route_id
+		WHERE b.user_id = $1
+		  AND EXISTS (SELECT 1 FROM payments p WHERE p.booking_id = b.id AND p.status IN ('SUCCESS', 'REFUNDED'))
+		ORDER BY b.created_at DESC
 	`
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
@@ -232,24 +261,22 @@ func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID stri
 	}
 	defer rows.Close()
 
-	var bookings []domain.Booking
+	bookings := []domain.BookingSummary{}
 	for rows.Next() {
-		var b domain.Booking
-		var statusStr string
+		var b domain.BookingSummary
+		var status, transport, payStatus, seats string
 		if err := rows.Scan(
-			&b.ID,
-			&b.UserID,
-			&b.TripID,
-			&b.PNRCode,
-			&b.TotalAmount,
-			&b.DiscountAmount,
-			&statusStr,
-			&b.CreatedAt,
-			&b.UpdatedAt,
+			&b.ID, &b.UserID, &b.TripID, &b.PNRCode, &b.TotalAmount, &b.DiscountAmount, &status,
+			&b.CreatedAt, &b.UpdatedAt,
+			&transport, &b.OperatorName, &b.RegistrationNo, &b.Origin, &b.Destination,
+			&b.DepartureTime, &b.ArrivalTime, &seats, &payStatus,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan booking: %w", err)
 		}
-		b.Status = domain.BookingStatus(statusStr)
+		b.Status = domain.BookingStatus(status)
+		b.TransportType = domain.TransportType(transport)
+		b.PaymentStatus = domain.PaymentStatus(payStatus)
+		b.Seats = splitSeats(seats)
 		bookings = append(bookings, b)
 	}
 	if err := rows.Err(); err != nil {

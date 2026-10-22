@@ -27,7 +27,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/search" element={<Padded><SearchResults /></Padded>} />
-            <Route path="/seat-select" element={<Padded><SeatSelect /></Padded>} />
+            <Route path="/seat-select" element={<SeatSelect />} />
             <Route path="/profile" element={<Padded><Profile /></Padded>} />
             <Route path="/admin" element={<Padded><AdminDashboard /></Padded>} />
           </Routes>

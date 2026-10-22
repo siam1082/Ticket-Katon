@@ -16,6 +16,7 @@ var (
 	ErrDuplicateTransaction = errors.New("payment transaction id already used")
 	ErrTripOverlap          = errors.New("vehicle already has a trip in that time window")
 	ErrReferenceNotFound    = errors.New("vehicle or route not found")
+	ErrAlreadyExists        = errors.New("already exists")
 )
 
 type UserRepository interface {
@@ -75,6 +76,12 @@ type AdminRepository interface {
 	ListVehicles(ctx context.Context, operatorID *string) ([]domain.AdminVehicle, error)
 	ListRoutes(ctx context.Context) ([]domain.AdminRoute, error)
 	ListUpcomingTrips(ctx context.Context, operatorID *string, limit int) ([]domain.AdminTrip, error)
+	ListOperators(ctx context.Context, operatorID *string) ([]domain.AdminOperator, error)
+	GetOperator(ctx context.Context, operatorID string) (*domain.AdminOperator, error)
+	// CreateRoute returns ErrAlreadyExists if the same origin and destination (any letter case) exists.
+	CreateRoute(ctx context.Context, origin, destination string) (*domain.AdminRoute, error)
+	// CreateVehicle returns the new vehicle id, or ErrAlreadyExists if the registration number is taken.
+	CreateVehicle(ctx context.Context, operatorID, registrationNo string, vtype domain.TransportType, layoutJSON string) (string, error)
 	// CreateTripWithSeats inserts a trip and all of its seat inventory in one transaction.
 	CreateTripWithSeats(ctx context.Context, vehicleID, routeID string, departure, arrival time.Time, baseFare float64, seats []domain.SeatSpec) (string, error)
 }

@@ -59,7 +59,8 @@ func bookingHandleError(w http.ResponseWriter, tag string, err error) {
 	case errors.Is(err, domain.ErrHoldInvalid),
 		errors.Is(err, domain.ErrSeatsTaken),
 		errors.Is(err, domain.ErrPaymentDuplicate),
-		errors.Is(err, domain.ErrPaymentProcessed):
+		errors.Is(err, domain.ErrPaymentProcessed),
+		errors.Is(err, domain.ErrCancelNotAllowed):
 		bookingWriteError(w, http.StatusConflict, msg)
 	case errors.Is(err, domain.ErrBookingNotFound),
 		errors.Is(err, domain.ErrPaymentNotFound):
@@ -154,4 +155,36 @@ func (h *BookingHandler) MyBookings(w http.ResponseWriter, r *http.Request) {
 		bookings = []domain.BookingSummary{}
 	}
 	bookingWriteJSON(w, http.StatusOK, bookings)
+}
+
+// CancellationInfo handles GET /api/v1/bookings/{pnr}/cancellation
+func (h *BookingHandler) CancellationInfo(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	preview, err := h.svc.GetCancellationPreview(r.Context(), claims.UserID, chi.URLParam(r, "pnr"))
+	if err != nil {
+		bookingHandleError(w, "CANCELLATION PREVIEW", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusOK, preview)
+}
+
+// Cancel handles POST /api/v1/bookings/{pnr}/cancel
+func (h *BookingHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	result, err := h.svc.CancelBooking(r.Context(), claims.UserID, chi.URLParam(r, "pnr"))
+	if err != nil {
+		bookingHandleError(w, "CANCEL BOOKING", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusOK, result)
 }

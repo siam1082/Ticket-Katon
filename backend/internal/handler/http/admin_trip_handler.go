@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/service"
 )
@@ -163,4 +165,81 @@ func (h *AdminTripHandler) CreateVehicle(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	bookingWriteJSON(w, http.StatusCreated, vehicle)
+}
+
+// CreateOperator handles POST /api/v1/admin/operators (super admin only)
+func (h *AdminTripHandler) CreateOperator(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+
+	var req domain.CreateOperatorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		bookingWriteError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	op, err := h.svc.CreateOperator(r.Context(), claims.Role, &req)
+	if err != nil {
+		adminHandleError(w, "ADMIN CREATE OPERATOR", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusCreated, op)
+}
+
+// ListOperatorAdmins handles GET /api/v1/admin/operator-admins (super admin only)
+func (h *AdminTripHandler) ListOperatorAdmins(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	admins, err := h.svc.ListOperatorAdmins(r.Context(), claims.Role)
+	if err != nil {
+		adminHandleError(w, "ADMIN LIST OPERATOR ADMINS", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusOK, admins)
+}
+
+// CreateOperatorAdmin handles POST /api/v1/admin/operator-admins (super admin only)
+func (h *AdminTripHandler) CreateOperatorAdmin(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<14)
+
+	var req domain.CreateOperatorAdminRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		bookingWriteError(w, http.StatusBadRequest, "invalid request payload")
+		return
+	}
+
+	res, err := h.svc.CreateOperatorAdmin(r.Context(), claims.Role, &req)
+	if err != nil {
+		adminHandleError(w, "ADMIN CREATE OPERATOR ADMIN", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusCreated, res)
+}
+
+// DeleteOperatorAdmin handles DELETE /api/v1/admin/operator-admins/{userID} (super admin only)
+func (h *AdminTripHandler) DeleteOperatorAdmin(w http.ResponseWriter, r *http.Request) {
+	claims, ok := bookingClaims(r)
+	if !ok {
+		bookingWriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := h.svc.RemoveOperatorAdmin(r.Context(), claims.Role, chi.URLParam(r, "userID")); err != nil {
+		adminHandleError(w, "ADMIN REMOVE OPERATOR ADMIN", err)
+		return
+	}
+	bookingWriteJSON(w, http.StatusOK, map[string]string{"message": "operator admin removed"})
 }

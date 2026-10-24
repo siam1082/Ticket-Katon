@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/mail"
 	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/crypto/bcrypt"
 	"ticket-katon-backend/internal/domain"
 	"ticket-katon-backend/internal/repository"
 )
@@ -406,4 +408,145 @@ func (s *AdminService) CreateVehicle(
 	}
 
 	return s.repo.GetVehicle(ctx, id)
+}
+
+// requireSuperAdmin: only a super admin may manage operators and their admins.
+func requireSuperAdmin(role domain.UserRole) error {
+	if role != domain.RoleSuperAdmin {
+		return ErrAdminForbidden
+	}
+	return nil
+}
+
+func (s *AdminService) CreateOperator(
+	ctx context.Context,
+	role domain.UserRole,
+	req *domain.CreateOperatorRequest,
+) (*domain.AdminOperator, error) {
+	if err := requireSuperAdmin(role); err != nil {
+		return nil, err
+	}
+
+	name := cleanSpaces(req.Name)
+	if n := utf8.RuneCountInString(name); n < 2 || n > 80 {
+		return nil, &ValidationError{"operator name must be 2 to 80 characters"}
+	}
+	switch req.Type {
+	case domain.TransportBus, domain.TransportLaunch, domain.TransportTrain:
+	default:
+		return nil, &ValidationError{"operator type must be BUS, LAUNCH or TRAIN"}
+	}
+	phone, ok := normalizeBDPhone(req.ContactPhone)
+	if !ok {
+		return nil, &ValidationError{"please enter a valid Bangladeshi contact number, like 01712345678"}
+	}
+
+	op, err := s.repo.CreateOperator(ctx, name, req.Type, phone)
+	if err != nil {
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, fmt.Errorf("%w: an operator with this name already exists", ErrAdminConflict)
+		}
+		return nil, err
+	}
+	return op, nil
+}
+
+func (s *AdminService) ListOperatorAdmins(ctx context.Context, role domain.UserRole) ([]domain.AdminOperatorAdmin, error) {
+	if err := requireSuperAdmin(role); err != nil {
+		return nil, err
+	}
+	return s.repo.ListOperatorAdmins(ctx)
+}
+
+// CreateOperatorAdmin makes someone an admin of an operator. If an account with that email
+// already exists and is a plain passenger, it is promoted (they sign in again to get the new
+// role). Otherwise a new, already-verified account is created with the given password.
+func (s *AdminService) CreateOperatorAdmin(
+	ctx context.Context,
+	role domain.UserRole,
+	req *domain.CreateOperatorAdminRequest,
+) (*domain.OperatorAdminResult, error) {
+	if err := requireSuperAdmin(role); err != nil {
+		return nil, err
+	}
+
+	email := normalizeEmail(req.Email)
+	if addr, err := mail.ParseAddress(email); err != nil || addr.Address != email {
+		return nil, &ValidationError{"please enter a valid email address"}
+	}
+	if strings.TrimSpace(req.OperatorID) == "" {
+		return nil, &ValidationError{"please select an operator"}
+	}
+	if _, err := s.repo.GetOperator(ctx, strings.TrimSpace(req.OperatorID)); err != nil {
+		if errors.Is(err, repository.ErrReferenceNotFound) {
+			return nil, &ValidationError{"selected operator does not exist"}
+		}
+		return nil, err
+	}
+	operatorID := strings.TrimSpace(req.OperatorID)
+
+	existing, err := s.repo.FindUserForAdmin(ctx, email)
+	switch {
+	case err == nil:
+		if existing.Role != domain.RoleCustomer {
+			return nil, fmt.Errorf("%w: this account is already an admin", ErrAdminConflict)
+		}
+		if err := s.repo.PromoteToOperatorAdmin(ctx, existing.ID, operatorID); err != nil {
+			if errors.Is(err, repository.ErrAlreadyExists) {
+				return nil, fmt.Errorf("%w: this account is already an admin", ErrAdminConflict)
+			}
+			return nil, err
+		}
+		return &domain.OperatorAdminResult{
+			Mode:   "promoted",
+			UserID: existing.ID,
+			Notice: "The existing account is now an operator admin. They must sign out and sign in again to see the admin portal.",
+		}, nil
+
+	case !errors.Is(err, domain.ErrNotFound):
+		return nil, err
+	}
+
+	// New account.
+	fullName := cleanSpaces(req.FullName)
+	if n := utf8.RuneCountInString(fullName); n < 2 || n > 100 {
+		return nil, &ValidationError{"full name must be 2 to 100 characters"}
+	}
+	phone, ok := normalizeBDPhone(req.Phone)
+	if !ok {
+		return nil, &ValidationError{"please enter a valid Bangladeshi mobile number, like 01712345678"}
+	}
+	if msg := passwordProblem(req.Password); msg != "" {
+		return nil, &ValidationError{msg}
+	}
+	hashed, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := s.repo.CreateOperatorAdminUser(ctx, operatorID, fullName, email, phone, string(hashed))
+	if err != nil {
+		if errors.Is(err, repository.ErrAlreadyExists) {
+			return nil, fmt.Errorf("%w: this email or mobile number is already registered", ErrAdminConflict)
+		}
+		return nil, err
+	}
+	return &domain.OperatorAdminResult{
+		Mode:   "created",
+		UserID: id,
+		Notice: "Account created. Share the email and the password you set with the new admin.",
+	}, nil
+}
+
+func (s *AdminService) RemoveOperatorAdmin(ctx context.Context, role domain.UserRole, userID string) error {
+	if err := requireSuperAdmin(role); err != nil {
+		return err
+	}
+	if err := s.repo.DemoteOperatorAdmin(ctx, strings.TrimSpace(userID)); err != nil {
+		if errors.Is(err, repository.ErrReferenceNotFound) {
+			return &ValidationError{"that operator admin was not found"}
+		}
+		return err
+	}
+	return nil
 }

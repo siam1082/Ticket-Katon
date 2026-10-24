@@ -37,6 +37,10 @@ type BookingService interface {
 	SimulatePayment(ctx context.Context, userID, paymentID, result string) (*domain.SimulatePaymentResponse, error)
 	GetPayment(ctx context.Context, userID, paymentID string) (*domain.SimulatePaymentResponse, error)
 	StartPendingExpiryWorker(ctx context.Context)
+
+	// Cancellation of paid tickets.
+	GetCancellationPreview(ctx context.Context, userID, pnr string) (*domain.CancellationPreview, error)
+	CancelBooking(ctx context.Context, userID, pnr string) (*domain.CancellationResult, error)
 }
 
 type bookingService struct {

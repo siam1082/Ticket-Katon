@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 type TripService struct {
 	repo        repository.TripRepository
 	seatLockSvc *SeatLockService
+	cities      CityLookup // optional: makes the search tolerant of spelling variants
 }
 
 func NewTripService(repo repository.TripRepository, seatLockSvc *SeatLockService) *TripService {
@@ -21,6 +23,13 @@ func NewTripService(repo repository.TripRepository, seatLockSvc *SeatLockService
 		repo:        repo,
 		seatLockSvc: seatLockSvc,
 	}
+}
+
+// NewTripServiceWithCities is NewTripService plus spelling-tolerant city search.
+func NewTripServiceWithCities(repo repository.TripRepository, seatLockSvc *SeatLockService, cities CityLookup) *TripService {
+	svc := NewTripService(repo, seatLockSvc)
+	svc.cities = cities
+	return svc
 }
 
 func (s *TripService) Search(ctx context.Context, params repository.TripSearchParams) ([]domain.TripSearchResult, error) {
@@ -31,7 +40,7 @@ func (s *TripService) Search(ctx context.Context, params repository.TripSearchPa
 		return nil, errors.New("origin and destination are required")
 	}
 
-	if strings.EqualFold(origin, dest) {
+	if strings.EqualFold(origin, dest) || (s.cities != nil && cityKey(origin) == cityKey(dest)) {
 		return nil, errors.New("origin and destination cannot be the same")
 	}
 
@@ -50,7 +59,46 @@ func (s *TripService) Search(ctx context.Context, params repository.TripSearchPa
 		return nil, errors.New("travel_date cannot be in the past")
 	}
 
-	return s.repo.SearchTrips(ctx, params)
+	return s.searchResolved(ctx, params)
+}
+
+// searchResolved searches every stored spelling of the typed cities (for example both
+// "Chattogram" and "Chittagong") and merges the results. If a city is unknown it falls back
+// to the plain search, which behaves exactly as before.
+func (s *TripService) searchResolved(ctx context.Context, params repository.TripSearchParams) ([]domain.TripSearchResult, error) {
+	if s.cities == nil {
+		return s.repo.SearchTrips(ctx, params)
+	}
+
+	origins, err := s.cities.Resolve(ctx, params.Origin)
+	if err != nil || len(origins) == 0 {
+		return s.repo.SearchTrips(ctx, params)
+	}
+	dests, err := s.cities.Resolve(ctx, params.Destination)
+	if err != nil || len(dests) == 0 {
+		return s.repo.SearchTrips(ctx, params)
+	}
+
+	seen := map[string]bool{}
+	merged := []domain.TripSearchResult{}
+	for _, o := range origins {
+		for _, d := range dests {
+			p := params
+			p.Origin, p.Destination = o, d
+			results, err := s.repo.SearchTrips(ctx, p)
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range results {
+				if !seen[r.ID] {
+					seen[r.ID] = true
+					merged = append(merged, r)
+				}
+			}
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].DepartureTime.Before(merged[j].DepartureTime) })
+	return merged, nil
 }
 
 func (s *TripService) GetSeats(ctx context.Context, tripID string) (*domain.TripSeatLayoutResponse, error) {

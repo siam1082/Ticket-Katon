@@ -10,15 +10,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/cors"
 	"github.com/go-chi/chi/v5"
 	chiMiddleware "github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 
 	"ticket-katon-backend/internal/config"
 	"ticket-katon-backend/internal/database"
 	"ticket-katon-backend/internal/domain"
 	httpHandler "ticket-katon-backend/internal/handler/http"
 	"ticket-katon-backend/internal/middleware"
+	"ticket-katon-backend/internal/pkg/mailer"
 	"ticket-katon-backend/internal/pkg/token"
 	"ticket-katon-backend/internal/repository/postgres"
 	"ticket-katon-backend/internal/service"
@@ -42,18 +43,22 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	// 2. Repositories & Token Maker
+	// 2. Repositories, Mailer & Token Maker
 	tokenMaker := token.NewTokenMaker(cfg.JWTSecret)
+	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom)
+
 	userRepo := postgres.NewPostgresUserRepository(pgPool)
 	tripRepo := postgres.NewPostgresTripRepository(pgPool)
 	bookingRepo := postgres.NewBookingRepository(pgPool)
 	adminRepo := postgres.NewAdminRepository(pgPool)
+	cityRepo := postgres.NewCityRepository(pgPool)
 
 	// 3. Services & Workers
 	healthSvc := service.NewHealthService(pgPool, redisClient)
-	authSvc := service.NewAuthService(userRepo, tokenMaker)
+	authSvc := service.NewAuthService(userRepo, tokenMaker, mail, cfg.Environment != "production")
 	seatLockSvc := service.NewSeatLockService(redisClient)
-	tripSvc := service.NewTripService(tripRepo, seatLockSvc)
+	citySvc := service.NewCityService(cityRepo)
+	tripSvc := service.NewTripServiceWithCities(tripRepo, seatLockSvc, citySvc)
 	bookingSvc := service.NewBookingService(bookingRepo, redisClient)
 	adminSvc := service.NewAdminService(adminRepo)
 
@@ -63,6 +68,7 @@ func main() {
 	// 4. Handlers
 	healthHdl := httpHandler.NewHealthHandler(healthSvc)
 	authHdl := httpHandler.NewAuthHandler(authSvc)
+	cityHdl := httpHandler.NewCityHandler(citySvc)
 	tripHdl := httpHandler.NewTripHandler(tripSvc)
 	seatLockHdl := httpHandler.NewSeatLockHandler(seatLockSvc)
 	bookingHdl := httpHandler.NewBookingHandler(bookingSvc)
@@ -91,10 +97,15 @@ func main() {
 
 	// API Routes
 	r.Route("/api/v1", func(api chi.Router) {
+		// Public City Suggestion Route
+		api.Get("/cities", cityHdl.Suggest)
+
 		// Auth Routes
 		api.Route("/auth", func(auth chi.Router) {
 			auth.Post("/register", authHdl.Register)
 			auth.Post("/login", authHdl.Login)
+			auth.Post("/verify-email", authHdl.VerifyEmail)
+			auth.Post("/resend-code", authHdl.ResendCode)
 
 			auth.Group(func(protected chi.Router) {
 				protected.Use(middleware.AuthMiddleware(tokenMaker))
@@ -118,9 +129,10 @@ func main() {
 		// Booking Routes (Protected with JWT)
 		api.Route("/bookings", func(b chi.Router) {
 			b.Use(middleware.AuthMiddleware(tokenMaker))
-			b.Post("/confirm", bookingHdl.Confirm)
 			b.Get("/my", bookingHdl.MyBookings)
 			b.Get("/{pnr}", bookingHdl.GetByPNR)
+			b.Get("/{pnr}/cancellation", bookingHdl.CancellationInfo)
+			b.Post("/{pnr}/cancel", bookingHdl.Cancel)
 		})
 
 		// Server-Side Payment Routes (Protected with JWT)
@@ -140,7 +152,6 @@ func main() {
 				sales.Use(middleware.RequireRole(domain.RoleOperatorAdmin, domain.RoleSuperAdmin))
 				sales.Post("/tickets/issue", adminHdl.IssueCounterTicket)
 
-				// Updated Dynamic Admin Trip Routes
 				sales.Get("/vehicles", adminTripHdl.ListVehicles)
 				sales.Get("/routes", adminTripHdl.ListRoutes)
 				sales.Get("/trips", adminTripHdl.ListTrips)
@@ -150,9 +161,13 @@ func main() {
 				sales.Post("/vehicles", adminTripHdl.CreateVehicle)
 			})
 
-			// Super Admin Only (Platform DevOps / Software Engineers)
+			// Super Admin Only (Operator & Operator-Admin Management)
 			admin.Group(func(super chi.Router) {
 				super.Use(middleware.RequireRole(domain.RoleSuperAdmin))
+				super.Post("/operators", adminTripHdl.CreateOperator)
+				super.Get("/operator-admins", adminTripHdl.ListOperatorAdmins)
+				super.Post("/operator-admins", adminTripHdl.CreateOperatorAdmin)
+				super.Delete("/operator-admins/{userID}", adminTripHdl.DeleteOperatorAdmin)
 			})
 		})
 	})

@@ -205,3 +205,20 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+.ad-adminrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.ad-adminrow .btn-secondary {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.ad-table td {
+  white-space: normal;
+}

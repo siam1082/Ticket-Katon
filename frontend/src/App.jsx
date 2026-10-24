@@ -6,6 +6,7 @@ import Footer from './components/Footer';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import VerifyEmail from './pages/VerifyEmail';
 import Profile from './pages/Profile';
 import SearchResults from './pages/SearchResults';
 import SeatSelect from './pages/SeatSelect';
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/search" element={<Padded><SearchResults /></Padded>} />
             <Route path="/seat-select" element={<SeatSelect />} />
             <Route path="/profile" element={<Padded><Profile /></Padded>} />

@@ -1,7 +1,7 @@
 -- Ticket-Katon demo seed. ALL DATA IS FICTIONAL (academic demo).
 -- Safe to run repeatedly: fixed ids / deterministic ids + ON CONFLICT.
 -- Re-running later adds trips for newly covered dates (today + next 7 days).
--- Requires 000001_init.sql to have been applied.
+-- Requires 000001_init.sql and 000002_email_verification.sql to have been applied.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -98,14 +98,15 @@ ON CONFLICT (trip_id, seat_number) DO NOTHING;
 --   admin@ticketkaton.demo     / Admin@12345  (SUPER_ADMIN)
 --   operator@ticketkaton.demo  / Oper@12345   (OPERATOR_ADMIN, Demo Green Line Coaches)
 --   passenger@ticketkaton.demo / Demo@12345   (CUSTOMER)
-INSERT INTO users (full_name, email, phone_number, password_hash, role, operator_id) VALUES
-  ('Demo Super Admin',    'admin@ticketkaton.demo',     '01700000001', crypt('Admin@12345', gen_salt('bf', 10)), 'SUPER_ADMIN'::user_role,    NULL),
-  ('Demo Operator Admin', 'operator@ticketkaton.demo',  '01700000003', crypt('Oper@12345',  gen_salt('bf', 10)), 'OPERATOR_ADMIN'::user_role, 'a0000000-0000-4000-8000-000000000001'),
-  ('Demo Passenger',      'passenger@ticketkaton.demo', '01700000002', crypt('Demo@12345',  gen_salt('bf', 10)), 'CUSTOMER'::user_role,       NULL)
+INSERT INTO users (full_name, email, phone_number, password_hash, role, operator_id, email_verified_at) VALUES
+  ('Demo Super Admin',    'admin@ticketkaton.demo',     '01700000001', crypt('Admin@12345', gen_salt('bf', 10)), 'SUPER_ADMIN'::user_role,    NULL, NOW()),
+  ('Demo Operator Admin', 'operator@ticketkaton.demo',  '01700000003', crypt('Oper@12345',  gen_salt('bf', 10)), 'OPERATOR_ADMIN'::user_role, 'a0000000-0000-4000-8000-000000000001', NOW()),
+  ('Demo Passenger',      'passenger@ticketkaton.demo', '01700000002', crypt('Demo@12345',  gen_salt('bf', 10)), 'CUSTOMER'::user_role,       NULL, NOW())
 ON CONFLICT (phone_number) DO UPDATE
 SET full_name     = EXCLUDED.full_name,
     email         = EXCLUDED.email,
     password_hash = EXCLUDED.password_hash,
     role          = EXCLUDED.role,
     operator_id   = EXCLUDED.operator_id,
+    email_verified_at = COALESCE(users.email_verified_at, NOW()),
     updated_at    = now();

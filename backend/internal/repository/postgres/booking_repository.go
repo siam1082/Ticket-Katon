@@ -245,7 +245,10 @@ func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID stri
 		                 FROM tickets tk WHERE tk.booking_id = b.id), ''),
 		       COALESCE((SELECT p.status::text FROM payments p
 		                 WHERE p.booking_id = b.id AND p.status IN ('SUCCESS', 'REFUNDED')
-		                 ORDER BY p.created_at DESC NULLS LAST LIMIT 1), '')
+		                 ORDER BY p.created_at DESC NULLS LAST LIMIT 1), ''),
+		       COALESCE((SELECT (p.raw_payload->>'refund_amount')::numeric FROM payments p
+		                 WHERE p.booking_id = b.id AND p.status IN ('SUCCESS', 'REFUNDED')
+		                 ORDER BY p.created_at DESC NULLS LAST LIMIT 1), 0)
 		FROM bookings b
 		JOIN trips t ON t.id = b.trip_id
 		JOIN vehicles v ON v.id = t.vehicle_id
@@ -269,7 +272,7 @@ func (r *bookingRepository) GetBookingsByUserID(ctx context.Context, userID stri
 			&b.ID, &b.UserID, &b.TripID, &b.PNRCode, &b.TotalAmount, &b.DiscountAmount, &status,
 			&b.CreatedAt, &b.UpdatedAt,
 			&transport, &b.OperatorName, &b.RegistrationNo, &b.Origin, &b.Destination,
-			&b.DepartureTime, &b.ArrivalTime, &seats, &payStatus,
+			&b.DepartureTime, &b.ArrivalTime, &seats, &payStatus, &b.RefundAmount,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan booking: %w", err)
 		}

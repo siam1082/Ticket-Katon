@@ -15,4 +15,5 @@ type BookingSummary struct {
 	ArrivalTime    time.Time     `json:"arrival_time"`
 	Seats          []string      `json:"seats"`
 	PaymentStatus  PaymentStatus `json:"payment_status"`
+	RefundAmount   float64       `json:"refund_amount"`
 }

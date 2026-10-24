@@ -13,6 +13,14 @@ type Config struct {
 	RedisURL    string
 	JWTSecret   string
 	Environment string
+
+	// Email (optional). With no SMTP_HOST, verification codes are printed in the
+	// server log (and shown on screen outside production) instead of being emailed.
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
 }
 
 func LoadConfig() *Config {
@@ -26,6 +34,12 @@ func LoadConfig() *Config {
 		RedisURL:    mustGetEnv("REDIS_URL"),
 		JWTSecret:   getEnv("JWT_SECRET", "default-dev-secret-key-change-me"),
 		Environment: getEnv("ENV", "development"),
+
+		SMTPHost:     getEnv("SMTP_HOST", ""),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUsername: getEnv("SMTP_USERNAME", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
 	}
 }
 

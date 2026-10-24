@@ -1,0 +1,41 @@
+.ci {
+  position: relative;
+}
+
+.ci-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin: 4px 0 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
+}
+
+.ci-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.ci-item.active,
+.ci-item:hover {
+  background: var(--primary-soft);
+}
+
+.ci-item small {
+  color: var(--muted);
+  font-size: 12px;
+}

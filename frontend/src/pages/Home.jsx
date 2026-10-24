@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Bus, Train, Ship, Search, Calendar, MapPin, Armchair, CreditCard, Ticket } from 'lucide-react';
+import CityInput from '../components/CityInput';
+import API from '../services/api';
 import './Home.css';
 
 const TYPES = {
@@ -87,8 +89,31 @@ export default function Home() {
   const [toCity, setToCity] = useState('');
   const [journeyDate, setJourneyDate] = useState('');
 
-  const handleSearch = (e) => {
+  const [hint, setHint] = useState(null); // { field: 'from' | 'to', typed, suggestions }
+
+  // Look the typed city up on the server. Returns null when it is fine (or the server cannot be
+  // reached, in which case we do not block the search), otherwise a hint to show the user.
+  const checkCity = async (field, typed) => {
+    try {
+      const res = await API.get('/cities', { params: { q: typed, limit: 3 } });
+      const list = res.data || [];
+      if (list.length > 0 && list[0].match === 'exact') return null;
+      return { field, typed, suggestions: list.map((c) => c.name) };
+    } catch {
+      return null;
+    }
+  };
+
+  const handleSearch = async (e) => {
     e.preventDefault();
+    setHint(null);
+
+    const problem = (await checkCity('from', fromCity.trim())) || (await checkCity('to', toCity.trim()));
+    if (problem) {
+      setHint(problem);
+      return;
+    }
+
     const params = new URLSearchParams({
       type: serviceType,
       from: fromCity.trim(),
@@ -96,6 +121,12 @@ export default function Home() {
       date: journeyDate,
     });
     navigate(`/search?${params.toString()}`);
+  };
+
+  const applySuggestion = (name) => {
+    if (hint.field === 'from') setFromCity(name);
+    else setToCity(name);
+    setHint(null);
   };
 
   return (
@@ -132,14 +163,10 @@ export default function Home() {
         </div>
 
         <form onSubmit={handleSearch} className="search-grid">
-          <div className="field">
-            <label htmlFor="from"><MapPin size={14} aria-hidden="true" /> From</label>
-            <input id="from" type="text" value={fromCity} onChange={(e) => setFromCity(e.target.value)} placeholder="e.g. Dhaka" required />
-          </div>
-          <div className="field">
-            <label htmlFor="to"><MapPin size={14} aria-hidden="true" /> To</label>
-            <input id="to" type="text" value={toCity} onChange={(e) => setToCity(e.target.value)} placeholder="e.g. Sylhet" required />
-          </div>
+          <CityInput id="from" label="From" icon={<MapPin size={14} aria-hidden="true" />}
+            value={fromCity} onChange={setFromCity} placeholder="e.g. Dhaka" required />
+          <CityInput id="to" label="To" icon={<MapPin size={14} aria-hidden="true" />}
+            value={toCity} onChange={setToCity} placeholder="e.g. Sylhet" required />
           <div className="field">
             <label htmlFor="date"><Calendar size={14} aria-hidden="true" /> Date of journey</label>
             <input id="date" type="date" min={todayLocal()} value={journeyDate} onChange={(e) => setJourneyDate(e.target.value)} required />
@@ -148,6 +175,24 @@ export default function Home() {
             <Search size={16} aria-hidden="true" /> Search {current.label}
           </button>
         </form>
+
+        {hint && (
+          <div className="city-hint" role="alert">
+            {hint.suggestions.length > 0 ? (
+              <>
+                <span>We could not find &ldquo;{hint.typed}&rdquo; as {hint.field === 'from' ? 'a starting city' : 'a destination'}. Did you mean</span>
+                {hint.suggestions.map((name) => (
+                  <button key={name} type="button" onClick={() => applySuggestion(name)}>{name}</button>
+                ))}
+                <span>?</span>
+              </>
+            ) : (
+              <span>
+                We do not have any routes for &ldquo;{hint.typed}&rdquo; yet. Start typing and pick a city from the list.
+              </span>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="steps" aria-labelledby="steps-title">

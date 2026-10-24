@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, PlusCircle, Ticket, Layers, CheckCircle2, AlertCircle, MapPin, Bus, Trash2 } from 'lucide-react';
+import { ShieldCheck, PlusCircle, Ticket, Layers, CheckCircle2, AlertCircle, MapPin, Bus, Trash2, Building2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
 import './AdminDashboard.css';
 
 const EMPTY_FORM = { vehicleId: '', routeId: '', departure: '', arrival: '', fare: '' };
 const EMPTY_ROUTE = { origin_city: '', destination_city: '' };
+const EMPTY_OPERATOR = { name: '', type: 'BUS', contact_phone: '' };
+const EMPTY_ADMIN = { operatorId: '', email: '', fullName: '', phone: '', password: '' };
 const EMPTY_COACH = { coach_name: '', class: 'SNIGDHA', layout: '2x2', total_seats: 60 };
 const EMPTY_VEHICLE = { operatorId: '', registrationNo: '', busLayout: '2x2', coaches: [{ ...EMPTY_COACH, coach_name: 'KA' }] };
 
@@ -41,14 +43,18 @@ export default function AdminDashboard() {
   const { user, isAuthenticated, role } = useAuth();
   const navigate = useNavigate();
   const allowed = isAuthenticated && role === 'admin';
+  const isSuper = user?.role === 'SUPER_ADMIN';
 
-  const [activeTab, setActiveTab] = useState('trips'); // 'trips' | 'routes' | 'vehicles' | 'issue'
+  const [activeTab, setActiveTab] = useState('trips'); // 'trips' | 'routes' | 'vehicles' | 'operators' | 'issue'
   const [vehicles, setVehicles] = useState([]);
   const [routes, setRoutes] = useState([]);
   const [trips, setTrips] = useState([]);
   const [operators, setOperators] = useState([]);
   const [routeForm, setRouteForm] = useState(EMPTY_ROUTE);
   const [vehicleForm, setVehicleForm] = useState(EMPTY_VEHICLE);
+  const [operatorAdmins, setOperatorAdmins] = useState([]);
+  const [operatorForm, setOperatorForm] = useState(EMPTY_OPERATOR);
+  const [adminForm, setAdminForm] = useState(EMPTY_ADMIN);
   const [form, setForm] = useState(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -64,6 +70,15 @@ export default function AdminDashboard() {
         API.get('/admin/operators'),
       ]);
       setOperators(o.data || []);
+      if (isSuper) {
+        // Separate try: if this one fails, the other lists should still load.
+        try {
+          const a = await API.get('/admin/operator-admins');
+          setOperatorAdmins(a.data || []);
+        } catch {
+          setOperatorAdmins([]);
+        }
+      }
       setVehicles(v.data || []);
       setRoutes(r.data || []);
       setTrips(t.data || []);
@@ -73,7 +88,7 @@ export default function AdminDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isSuper]);
 
   useEffect(() => {
     if (!allowed) {
@@ -174,6 +189,60 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleCreateOperator = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await API.post('/admin/operators', operatorForm);
+      setMessage(`Operator "${res.data.name}" added. Now add an admin for it below.`);
+      setOperatorForm(EMPTY_OPERATOR);
+      setAdminForm({ ...adminForm, operatorId: res.data.id });
+      await load();
+    } catch (err) {
+      setError(errText(err, 'Could not add the operator.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateOperatorAdmin = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const res = await API.post('/admin/operator-admins', {
+        operator_id: adminForm.operatorId,
+        email: adminForm.email,
+        full_name: adminForm.fullName,
+        phone: adminForm.phone,
+        password: adminForm.password,
+      });
+      setMessage(res.data.notice);
+      setAdminForm({ ...EMPTY_ADMIN, operatorId: adminForm.operatorId });
+      await load();
+    } catch (err) {
+      setError(errText(err, 'Could not add the operator admin.'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRemoveAdmin = async (admin) => {
+    if (!window.confirm(`Remove ${admin.full_name} as admin of ${admin.operator_name}? They become a normal passenger.`)) return;
+    setError('');
+    setMessage('');
+    try {
+      await API.delete(`/admin/operator-admins/${admin.user_id}`);
+      setMessage(`${admin.full_name} is no longer an operator admin.`);
+      await load();
+    } catch (err) {
+      setError(errText(err, 'Could not remove the operator admin.'));
+    }
+  };
+
   const roleLabel = user?.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'OPERATOR ADMIN';
   const minTime = toLocalInput(new Date());
 
@@ -204,6 +273,11 @@ export default function AdminDashboard() {
           <button type="button" className={activeTab === 'vehicles' ? 'on' : ''} onClick={() => switchTab('vehicles')}>
             <Bus size={16} aria-hidden="true" /> Vehicles
           </button>
+          {isSuper && (
+            <button type="button" className={activeTab === 'operators' ? 'on' : ''} onClick={() => switchTab('operators')}>
+              <Building2 size={16} aria-hidden="true" /> Operators
+            </button>
+          )}
           <button type="button" className={activeTab === 'issue' ? 'on' : ''} onClick={() => switchTab('issue')}>
             <Ticket size={16} aria-hidden="true" /> Counter ticket
           </button>
@@ -441,6 +515,109 @@ export default function AdminDashboard() {
                           <td>{layoutSummary(v)}</td>
                         </tr>
                       ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
+          )}
+
+          {activeTab === 'operators' && isSuper && (
+            <>
+              <section className="card">
+                <h3 className="card-title">Add an operator</h3>
+                <p className="muted">An operator is a company, like a bus line or a launch service. Pick its type once: all its vehicles are of that type.</p>
+                <form onSubmit={handleCreateOperator} className="form-grid ad-form">
+                  <div className="form-field">
+                    <label htmlFor="opname">Operator name</label>
+                    <input id="opname" value={operatorForm.name} maxLength={80} placeholder="e.g. Demo River Express" required
+                      onChange={(e) => setOperatorForm({ ...operatorForm, name: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="optype">Type</label>
+                    <select id="optype" value={operatorForm.type} onChange={(e) => setOperatorForm({ ...operatorForm, type: e.target.value })}>
+                      <option value="BUS">Bus</option>
+                      <option value="LAUNCH">Launch</option>
+                      <option value="TRAIN">Train</option>
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="opphone">Contact number</label>
+                    <input id="opphone" type="tel" value={operatorForm.contact_phone} placeholder="01712345678" required
+                      onChange={(e) => setOperatorForm({ ...operatorForm, contact_phone: e.target.value })} />
+                  </div>
+                  <div className="ad-actions">
+                    <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Adding...' : 'Add operator'}</button>
+                  </div>
+                </form>
+              </section>
+
+              <section className="card">
+                <h3 className="card-title">Add an operator admin</h3>
+                <p className="muted">
+                  If the email already belongs to a passenger account, that account is promoted and the
+                  name, mobile and password below are ignored (they must sign in again). Otherwise a new
+                  account is created with the password you set here.
+                </p>
+                <form onSubmit={handleCreateOperatorAdmin} className="form-grid ad-form">
+                  <div className="form-field">
+                    <label htmlFor="adop">Operator</label>
+                    <select id="adop" value={adminForm.operatorId} required
+                      onChange={(e) => setAdminForm({ ...adminForm, operatorId: e.target.value })}>
+                      <option value="">Select an operator</option>
+                      {operators.map((o) => <option key={o.id} value={o.id}>{o.name} ({o.type})</option>)}
+                    </select>
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="ademail">Email</label>
+                    <input id="ademail" type="email" value={adminForm.email} placeholder="admin@example.com" required
+                      onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="adname">Full name (new account)</label>
+                    <input id="adname" value={adminForm.fullName} maxLength={100}
+                      onChange={(e) => setAdminForm({ ...adminForm, fullName: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="adphone">Mobile (new account)</label>
+                    <input id="adphone" type="tel" value={adminForm.phone} placeholder="01712345678"
+                      onChange={(e) => setAdminForm({ ...adminForm, phone: e.target.value })} />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor="adpass">Password (new account)</label>
+                    <input id="adpass" type="password" value={adminForm.password} autoComplete="new-password" placeholder="8+ characters, a letter and a number"
+                      onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })} />
+                  </div>
+                  <div className="ad-actions">
+                    <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Add operator admin'}</button>
+                  </div>
+                </form>
+              </section>
+
+              <section className="card ad-list">
+                <h3 className="card-title">Operators ({operators.length}) and their admins</h3>
+                <div className="ad-table-wrap">
+                  <table className="ad-table">
+                    <thead><tr><th>Operator</th><th>Type</th><th>Admins</th></tr></thead>
+                    <tbody>
+                      {operators.map((o) => {
+                        const admins = operatorAdmins.filter((a) => a.operator_id === o.id);
+                        return (
+                          <tr key={o.id}>
+                            <td>{o.name}</td>
+                            <td>{o.type}</td>
+                            <td>
+                              {admins.length === 0 && <span className="muted">No admin yet</span>}
+                              {admins.map((a) => (
+                                <div key={a.user_id} className="ad-adminrow">
+                                  <span>{a.full_name} <span className="muted">({a.email})</span></span>
+                                  <button type="button" className="btn-secondary" onClick={() => handleRemoveAdmin(a)}>Remove</button>
+                                </div>
+                              ))}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bus, Train, Ship, MapPin, Calendar, Clock, Printer, ChevronDown } from 'lucide-react';
+import { Bus, Train, Ship, MapPin, Calendar, Clock, Printer, ChevronDown, X, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
 import './Profile.css';
@@ -34,7 +34,7 @@ function initials(name) {
     .join('');
 }
 
-function TicketCard({ booking, printing, onPrint }) {
+function TicketCard({ booking, printing, onPrint, onCancel }) {
   const t = TRANSPORT[booking.transport_type] || TRANSPORT.BUS;
   const Icon = t.Icon;
   const status = booking.status;
@@ -66,11 +66,24 @@ function TicketCard({ booking, printing, onPrint }) {
         <span>Arrives {formatTime(booking.arrival_time)}</span>
       </div>
 
+      {status === 'CANCELLED' && (
+        <p className="pf-refund">
+          {booking.refund_amount > 0
+            ? `Cancelled. Demo refund: ${booking.refund_amount} BDT`
+            : 'Cancelled. No refund applied.'}
+        </p>
+      )}
+
       <footer className="pf-ticket-foot">
         <span className="pf-demo">Demo ticket · not valid for travel</span>
-        <button type="button" className="pf-print" onClick={() => onPrint(booking.id)}>
-          <Printer size={14} aria-hidden="true" /> Print
-        </button>
+        <span className="pf-actions">
+          {onCancel && (
+            <button type="button" className="pf-cancel" onClick={() => onCancel(booking)}>Cancel ticket</button>
+          )}
+          <button type="button" className="pf-print" onClick={() => onPrint(booking.id)}>
+            <Printer size={14} aria-hidden="true" /> Print
+          </button>
+        </span>
       </footer>
     </article>
   );
@@ -88,31 +101,65 @@ export default function Profile() {
   const [printId, setPrintId] = useState(null);
   const [loadedAt, setLoadedAt] = useState(0); // time the bookings were fetched
 
+  const load = useCallback(async () => {
+    try {
+      const [p, b] = await Promise.all([API.get('/auth/profile'), API.get('/bookings/my')]);
+      setProfile(p.data);
+      setBookings(b.data || []);
+      setLoadedAt(Date.now());
+      setError('');
+    } catch (err) {
+      setError(errText(err, 'Could not load your profile.'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/login');
       return;
     }
+    load();
+  }, [isAuthenticated, navigate, load]);
 
-    let cancelled = false;
-    (async () => {
-      try {
-        const [p, b] = await Promise.all([API.get('/auth/profile'), API.get('/bookings/my')]);
-        if (cancelled) return;
-        setProfile(p.data);
-        setBookings(b.data || []);
-        setLoadedAt(Date.now());
-      } catch (err) {
-        if (!cancelled) setError(errText(err, 'Could not load your profile.'));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+  // ---- cancelling a ticket
+  const [cancelTarget, setCancelTarget] = useState(null); // the booking being cancelled
+  const [preview, setPreview] = useState(null);
+  const [cancelError, setCancelError] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [notice, setNotice] = useState('');
 
-    return () => {
-      cancelled = true;
-    };
-  }, [isAuthenticated, navigate]);
+  const openCancel = async (booking) => {
+    setCancelTarget(booking);
+    setPreview(null);
+    setCancelError('');
+    try {
+      const res = await API.get(`/bookings/${booking.pnr_code}/cancellation`);
+      setPreview(res.data);
+    } catch (err) {
+      setCancelError(errText(err, 'Could not check the cancellation rules.'));
+    }
+  };
+
+  const closeCancel = () => {
+    if (!cancelling) setCancelTarget(null);
+  };
+
+  const confirmCancel = async () => {
+    setCancelling(true);
+    setCancelError('');
+    try {
+      const res = await API.post(`/bookings/${cancelTarget.pnr_code}/cancel`);
+      setNotice(res.data.message);
+      setCancelTarget(null);
+      await load();
+    } catch (err) {
+      setCancelError(errText(err, 'Could not cancel the ticket.'));
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const { upcoming, past } = useMemo(() => {
     const isUpcoming = (b) => b.status === 'CONFIRMED' && new Date(b.departure_time).getTime() > loadedAt;
@@ -136,6 +183,12 @@ export default function Profile() {
   return (
     <div className="pf">
       {error && <div className="pf-error" role="alert">{error}</div>}
+      {notice && (
+        <div className="pf-notice" role="status">
+          <CheckCircle2 size={16} aria-hidden="true" /> <span>{notice}</span>
+          <button type="button" aria-label="Dismiss" onClick={() => setNotice('')}><X size={14} /></button>
+        </div>
+      )}
 
       {profile && (
         <section className="pf-card pf-head">
@@ -159,7 +212,7 @@ export default function Profile() {
         ) : (
           <div className="pf-grid">
             {upcoming.map((b) => (
-              <TicketCard key={b.id} booking={b} printing={printId === b.id} onPrint={handlePrint} />
+              <TicketCard key={b.id} booking={b} printing={printId === b.id} onPrint={handlePrint} onCancel={openCancel} />
             ))}
           </div>
         )}
@@ -179,6 +232,47 @@ export default function Profile() {
             </div>
           )}
         </section>
+      )}
+
+      {cancelTarget && (
+        <div className="pf-overlay" role="dialog" aria-modal="true" aria-label="Cancel ticket">
+          <div className="pf-modal">
+            <header>
+              <h3>Cancel this ticket?</h3>
+              <button type="button" onClick={closeCancel} aria-label="Close" disabled={cancelling}><X size={18} /></button>
+            </header>
+
+            <p className="pf-modal-route">
+              {cancelTarget.origin} → {cancelTarget.destination} · PNR {cancelTarget.pnr_code}
+            </p>
+
+            {!preview && !cancelError && <p className="pf-muted">Checking the cancellation rules...</p>}
+            {cancelError && <div className="pf-error" role="alert">{cancelError}</div>}
+
+            {preview && (
+              <>
+                <div className="pf-refund-box">
+                  <div><span>Ticket price</span><strong>{preview.total_amount} BDT</strong></div>
+                  <div><span>Refund ({preview.refund_percent}%)</span><strong>{preview.refund_amount} BDT</strong></div>
+                </div>
+
+                {!preview.can_cancel && <div className="pf-error" role="alert">{preview.reason}</div>}
+
+                <ul className="pf-policy">
+                  {preview.policy.map((rule) => <li key={rule}>{rule}</li>)}
+                </ul>
+                <p className="pf-muted">Demo only. No real money is refunded.</p>
+              </>
+            )}
+
+            <div className="pf-modal-actions">
+              <button type="button" className="btn-secondary" onClick={closeCancel} disabled={cancelling}>Keep ticket</button>
+              <button type="button" className="pf-danger" onClick={confirmCancel} disabled={!preview?.can_cancel || cancelling}>
+                {cancelling ? 'Cancelling...' : 'Cancel ticket'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { User, ShieldCheck, ArrowRight, Ticket } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
+import { EMAIL_RE } from '../utils/validators';
 import './Auth.css';
 
 const STAFF_ROLES = ['OPERATOR_ADMIN', 'SUPER_ADMIN'];
@@ -19,6 +20,14 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (!EMAIL_RE.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
+      return;
+    }
     setLoading(true);
 
     try {
@@ -35,6 +44,10 @@ export default function Login() {
       login(user, token, isStaff ? 'admin' : 'user');
       navigate(isStaff ? '/admin' : '/');
     } catch (err) {
+      if (err.response?.data?.code === 'EMAIL_NOT_VERIFIED') {
+        navigate('/verify-email', { state: { email: email.trim(), fromLogin: true } });
+        return;
+      }
       setError(err.response?.data?.error || err.response?.data?.message || 'Invalid email or password.');
     } finally {
       setLoading(false);
@@ -85,7 +98,7 @@ export default function Login() {
           {isAdmin && <p className="auth-hint">Admin accounts are created for the presentation only.</p>}
           {error && <div className="auth-error" role="alert">{error}</div>}
 
-          <form onSubmit={handleSubmit} className="auth-form">
+          <form onSubmit={handleSubmit} className="auth-form" noValidate>
             <div className="auth-field">
               <label htmlFor="email">Email</label>
               <input

@@ -289,3 +289,114 @@ func (r *adminRepository) CreateVehicle(
 	}
 	return id, nil
 }
+
+func (r *adminRepository) CreateOperator(
+	ctx context.Context,
+	name string,
+	otype domain.TransportType,
+	contactPhone string,
+) (*domain.AdminOperator, error) {
+	var o domain.AdminOperator
+	var t string
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO operators (name, type, contact_phone)
+		SELECT $1::text, $2::text::transport_type, $3::text
+		WHERE NOT EXISTS (SELECT 1 FROM operators WHERE lower(name) = lower($1::text))
+		RETURNING id, name, type::text`, name, string(otype), contactPhone).Scan(&o.ID, &o.Name, &t)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrAlreadyExists
+		}
+		return nil, fmt.Errorf("failed to create operator: %w", err)
+	}
+	o.Type = domain.TransportType(t)
+	return &o, nil
+}
+
+func (r *adminRepository) ListOperatorAdmins(ctx context.Context) ([]domain.AdminOperatorAdmin, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT u.id, u.full_name, COALESCE(u.email, ''), u.phone_number, o.id, o.name
+		FROM users u
+		JOIN operators o ON o.id = u.operator_id
+		WHERE u.role = 'OPERATOR_ADMIN'
+		ORDER BY o.name, u.full_name`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list operator admins: %w", err)
+	}
+	defer rows.Close()
+
+	admins := []domain.AdminOperatorAdmin{}
+	for rows.Next() {
+		var a domain.AdminOperatorAdmin
+		if err := rows.Scan(&a.UserID, &a.FullName, &a.Email, &a.Phone, &a.OperatorID, &a.OperatorName); err != nil {
+			return nil, fmt.Errorf("failed to scan operator admin: %w", err)
+		}
+		admins = append(admins, a)
+	}
+	return admins, rows.Err()
+}
+
+func (r *adminRepository) FindUserForAdmin(ctx context.Context, email string) (*repository.AdminUserRef, error) {
+	var ref repository.AdminUserRef
+	var role string
+	err := r.db.QueryRow(ctx,
+		`SELECT id, role::text, operator_id::text FROM users WHERE lower(email) = lower($1)`, email).
+		Scan(&ref.ID, &role, &ref.OperatorID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to look up user: %w", err)
+	}
+	ref.Role = domain.UserRole(role)
+	return &ref, nil
+}
+
+func (r *adminRepository) PromoteToOperatorAdmin(ctx context.Context, userID, operatorID string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE users SET role = 'OPERATOR_ADMIN', operator_id = $2::uuid, updated_at = NOW()
+		WHERE id = $1 AND role = 'CUSTOMER'`, userID, operatorID)
+	if err != nil {
+		return fmt.Errorf("failed to promote user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return repository.ErrAlreadyExists
+	}
+	return nil
+}
+
+func (r *adminRepository) CreateOperatorAdminUser(
+	ctx context.Context,
+	operatorID, fullName, email, phone, passwordHash string,
+) (string, error) {
+	var id string
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO users (full_name, email, phone_number, password_hash, role, operator_id, email_verified_at)
+		VALUES ($1, $2, $3, $4, 'OPERATOR_ADMIN', $5::uuid, NOW())
+		RETURNING id`, fullName, email, phone, passwordHash, operatorID).Scan(&id)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "", repository.ErrAlreadyExists
+		}
+		return "", fmt.Errorf("failed to create operator admin: %w", err)
+	}
+	return id, nil
+}
+
+func (r *adminRepository) DemoteOperatorAdmin(ctx context.Context, userID string) error {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE users SET role = 'CUSTOMER', operator_id = NULL, updated_at = NOW()
+		WHERE id = $1::uuid AND role = 'OPERATOR_ADMIN'`, userID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return repository.ErrReferenceNotFound
+		}
+		return fmt.Errorf("failed to remove operator admin: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return repository.ErrReferenceNotFound
+	}
+	return nil
+}

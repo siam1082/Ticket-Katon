@@ -11,7 +11,7 @@ type UserRole string
 const (
 	RoleCustomer      UserRole = "CUSTOMER"
 	RoleOperatorAdmin UserRole = "OPERATOR_ADMIN" // কাউন্টার সেলস স্টাফ ও টিকিট অফিসার
-	RoleSuperAdmin    UserRole = "SUPER_ADMIN"    // প্ল্যাটফর্ম সফটওয়্যার ইঞ্জিনিয়ার ও ডেভঅপস
+	RoleSuperAdmin    UserRole = "SUPER_ADMIN"    // প্ল্যাটফর্ম সফটওয়্যার ইঞ্জিনিয়ার ও ডেভঅপস
 )
 
 type User struct {
@@ -24,6 +24,9 @@ type User struct {
 	Role         UserRole  `json:"role"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+
+	EmailVerifiedAt *time.Time `json:"-"`
+	EmailVerified   bool       `json:"email_verified"`
 }
 
 // -----------------------------------------------------------------------------
@@ -88,6 +91,7 @@ type SeatMetadata struct {
 	Fare        float64    `json:"fare"`
 	Status      SeatStatus `json:"status"`
 }
+
 // -----------------------------------------------------------------------------
 // TRIP SEARCH & LAYOUT RESPONSES
 // -----------------------------------------------------------------------------
@@ -117,8 +121,9 @@ type TripSeatLayoutResponse struct {
 	Seats            []SeatMetadata `json:"seats"`
 }
 
-
+// -----------------------------------------------------------------------------
 // BOOKING, TICKET & PAYMENT DOMAIN
+// -----------------------------------------------------------------------------
 
 type BookingStatus string
 
@@ -189,6 +194,7 @@ const (
 	PaymentStatusInitiated PaymentStatus = "INITIATED"
 	PaymentStatusSuccess   PaymentStatus = "SUCCESS"
 	PaymentStatusFailed    PaymentStatus = "FAILED"
+	PaymentStatusRefunded  PaymentStatus = "REFUNDED"
 )
 
 type Payment struct {
@@ -209,7 +215,9 @@ type PaymentPayload struct {
 	TransactionID string         `json:"transaction_id"`
 }
 
+// -----------------------------------------------------------------------------
 // REQUEST & RESPONSE DTOS
+// -----------------------------------------------------------------------------
 
 type ConfirmBookingRequest struct {
 	TripID     string          `json:"trip_id"`

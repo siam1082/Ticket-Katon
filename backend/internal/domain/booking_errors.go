@@ -14,6 +14,7 @@ var (
 	ErrBookingNotFound  = errors.New("booking not found")             // 404
 	ErrPaymentNotFound  = errors.New("payment not found")             // 404
 	ErrPaymentProcessed = errors.New("payment already processed")     // 409
+	ErrCancelNotAllowed = errors.New("cancellation not allowed")      // 409
 )
 
 // BookingError carries a client-safe message and the kind used for errors.Is checks.

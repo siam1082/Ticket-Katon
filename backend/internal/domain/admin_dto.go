@@ -82,3 +82,34 @@ type CreateVehicleRequest struct {
 	BusLayout      string        `json:"bus_layout"` // BUS only: 2x2 or 2x1
 	Coaches        []CoachConfig `json:"coaches"`    // TRAIN only
 }
+
+type CreateOperatorRequest struct {
+	Name         string        `json:"name"`
+	Type         TransportType `json:"type"`
+	ContactPhone string        `json:"contact_phone"`
+}
+
+// CreateOperatorAdminRequest either promotes an existing passenger (matched by email)
+// or creates a new account; full_name, phone and password are only needed for a new account.
+type CreateOperatorAdminRequest struct {
+	OperatorID string `json:"operator_id"`
+	Email      string `json:"email"`
+	FullName   string `json:"full_name"`
+	Phone      string `json:"phone"`
+	Password   string `json:"password"`
+}
+
+type AdminOperatorAdmin struct {
+	UserID       string `json:"user_id"`
+	FullName     string `json:"full_name"`
+	Email        string `json:"email"`
+	Phone        string `json:"phone"`
+	OperatorID   string `json:"operator_id"`
+	OperatorName string `json:"operator_name"`
+}
+
+type OperatorAdminResult struct {
+	Mode   string `json:"mode"` // "created" or "promoted"
+	UserID string `json:"user_id"`
+	Notice string `json:"notice"`
+}

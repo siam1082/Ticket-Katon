@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { CheckCircle2, AlertCircle, Clock, ShieldCheck, X, AlertTriangle, Info } from 'lucide-react';
 import API from '../services/api';
+import PageLoader from '../components/PageLoader';
+import { rememberTransportType } from '../hooks/useTransportType';
 import { useAuth } from '../context/AuthContext';
 import './SeatSelect.css';
 
@@ -110,6 +112,7 @@ export default function SeatSelect() {
     try {
       const res = await API.get(`/trips/${tripId}/seats`);
       setLayout(res.data);
+      rememberTransportType(res.data?.transport_type);
     } catch (err) {
       setError(errText(err, 'Failed to load seats'));
     } finally {
@@ -279,7 +282,7 @@ export default function SeatSelect() {
     }
   };
 
-  if (loading) return <p className="ss-loading">Loading seat layout...</p>;
+  if (loading) return <PageLoader label="Loading seat layout…" />;
 
   if (booking) {
     return (

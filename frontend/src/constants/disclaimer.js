@@ -1,5 +1,5 @@
 export const DISCLAIMER_SHORT =
-  'This is a prototype. Operators, schedules, seats and fares are fictional, and payments are simulated.';
+  'Fictional operators, schedules and fares. Payments are simulated, no real money is used.';
 
 export const DISCLAIMER_EN =
   'Ticket-Katon is an academic demo/prototype. Operator, schedule, seat and fare information is fictional. ' +

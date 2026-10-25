@@ -1,0 +1,83 @@
+.pl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 16px;
+  color: #0f766e;
+}
+
+.pl--full {
+  min-height: 60vh;
+}
+
+.pl svg {
+  width: min(300px, 80vw);
+  height: auto;
+  overflow: hidden;
+}
+
+.pl-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.pl-bar {
+  width: 160px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.pl-bar i {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #14b8a6, #0f766e);
+  animation: pl-slide 1.2s ease-in-out infinite;
+}
+
+.pl-sky { animation: pl-scroll 3s linear infinite; }
+.pl-road { animation: pl-dash 0.6s linear infinite; }
+.pl-bus { animation: pl-bounce 0.45s ease-in-out infinite alternate; }
+.pl-wheel { transform-box: fill-box; transform-origin: center; animation: pl-spin 0.7s linear infinite; }
+
+@keyframes pl-slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }
+@keyframes pl-scroll { to { transform: translateX(-60px); } }
+@keyframes pl-dash { to { stroke-dashoffset: -26; } }
+@keyframes pl-bounce { to { transform: translateY(-1.6px); } }
+@keyframes pl-spin { to { transform: rotate(360deg); } }
+
+/* train: the sleepers rush past; the carriages sway a little less than the bus */
+.pl-sleepers { animation: pl-sleep 0.45s linear infinite; }
+@keyframes pl-sleep { to { stroke-dashoffset: -14; } }
+
+/* launch: the waves roll by, the boat bobs and the smoke drifts up */
+.pl-wave { animation: pl-wave 1.1s linear infinite; }
+.pl-wave--slow { animation-duration: 1.8s; opacity: 0.6; }
+@keyframes pl-wave { to { transform: translateX(-30px); } }
+
+.pl-boat {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pl-bob 1.1s ease-in-out infinite alternate;
+}
+@keyframes pl-bob { to { transform: translateY(-2.5px) rotate(-1deg); } }
+
+.pl-smoke circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: pl-puff 1.8s ease-out infinite;
+}
+.pl-smoke circle:nth-child(2) { animation-delay: 0.6s; }
+.pl-smoke circle:nth-child(3) { animation-delay: 1.2s; }
+@keyframes pl-puff {
+  0% { transform: translate(0, 0) scale(0.6); opacity: 0.7; }
+  100% { transform: translate(8px, -18px) scale(1.5); opacity: 0; }
+}

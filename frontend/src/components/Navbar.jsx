@@ -1,24 +1,38 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom';
-import { Bus, Train, Ship, User, LogOut, Ticket, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Ticket, Menu, X, ShieldCheck, User, LogOut } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import './Navbar.css';
 
-const SERVICES = [
-  { type: 'bus', label: 'Bus', Icon: Bus },
-  { type: 'train', label: 'Train', Icon: Train },
-  { type: 'launch', label: 'Launch', Icon: Ship },
+// Links to parts of the home page use a #section address. "match" decides which link is highlighted.
+const NAV_ITEMS = [
+  { label: 'Home', to: '/', match: ({ onHome, type, hash }) => onHome && !type && !hash },
+  { label: 'Bus', to: '/?type=bus', match: ({ onHome, type, hash }) => onHome && type === 'bus' && !hash },
+  { label: 'Train', to: '/?type=train', match: ({ onHome, type, hash }) => onHome && type === 'train' && !hash },
+  { label: 'Launch', to: '/?type=launch', match: ({ onHome, type, hash }) => onHome && type === 'launch' && !hash },
+  { label: 'Routes', to: '/#routes', match: ({ onHome, hash }) => onHome && hash === '#routes' },
+  { label: 'About us', to: '/#team', match: ({ onHome, hash }) => onHome && hash === '#team' },
+  { label: 'Contact', to: '/#contact', match: ({ hash }) => hash === '#contact' },
 ];
 
 export default function Navbar() {
   const { isAuthenticated, user, role, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname, search, hash } = useLocation();
+  const [open, setOpen] = useState(false);
+
+  // Close the mobile menu after every navigation.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname, search, hash]);
+
+  const state = { onHome: pathname === '/', type: new URLSearchParams(search).get('type'), hash };
+  const displayName = user?.full_name || user?.name || 'Profile';
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
-
-  const displayName = user?.full_name || user?.name || 'Profile';
 
   return (
     <header className="nav">
@@ -30,38 +44,54 @@ export default function Navbar() {
           Ticket<span>Katon</span>
         </Link>
 
-        <nav className="nav-services" aria-label="Transport types">
-          {SERVICES.map(({ type, label, Icon }) => (
-            <NavLink key={type} to={`/?type=${type}`} className="nav-service">
-              <Icon size={18} aria-hidden="true" />
-              <span>{label}</span>
-            </NavLink>
-          ))}
-        </nav>
+        <button
+          type="button"
+          className="nav-toggle"
+          aria-label={open ? 'Close menu' : 'Open menu'}
+          aria-expanded={open}
+          aria-controls="nav-panel"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? <X size={22} /> : <Menu size={22} />}
+        </button>
 
-        {isAuthenticated ? (
-          <div className="nav-actions">
-            {role === 'admin' && (
-              <Link to="/admin" className="nav-profile">
-                <ShieldCheck size={18} aria-hidden="true" />
-                <span>Admin</span>
+        <div id="nav-panel" className={open ? 'nav-panel open' : 'nav-panel'}>
+          <nav className="nav-links" aria-label="Main">
+            {NAV_ITEMS.map((item) => (
+              <Link
+                key={item.label}
+                to={item.to}
+                className={item.match(state) ? 'nav-link active' : 'nav-link'}
+                aria-current={item.match(state) ? 'page' : undefined}
+              >
+                {item.label}
               </Link>
-            )}
-            <Link to="/profile" className="nav-profile">
-              <User size={18} aria-hidden="true" />
-              <span>{displayName}</span>
-            </Link>
-            <button type="button" onClick={handleLogout} className="nav-logout">
-              <LogOut size={16} aria-hidden="true" />
-              <span>Logout</span>
-            </button>
-          </div>
-        ) : (
+            ))}
+          </nav>
+
           <div className="nav-actions">
-            <Link to="/login" className="btn-secondary nav-btn">Login</Link>
-            <Link to="/register" className="btn-primary nav-btn">Sign Up</Link>
+            {isAuthenticated ? (
+              <>
+                {role === 'admin' && (
+                  <Link to="/admin" className="nav-text-link">
+                    <ShieldCheck size={16} aria-hidden="true" /> Admin
+                  </Link>
+                )}
+                <Link to="/profile" className="nav-text-link">
+                  <User size={16} aria-hidden="true" /> {displayName}
+                </Link>
+                <button type="button" onClick={handleLogout} className="nav-logout">
+                  <LogOut size={15} aria-hidden="true" /> Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <Link to="/login" className="btn-secondary nav-btn">Login</Link>
+                <Link to="/register" className="btn-primary nav-btn">Sign Up</Link>
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </header>
   );

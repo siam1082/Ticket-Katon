@@ -1,91 +1,355 @@
-.gov-search-results {
-  width: min(100% - 32px, 1000px);
-  margin: 28px auto 48px;
-}
-
-.gov-search-results .card {
-  border: 1px solid #e2eaf5;
-  border-radius: 10px;
-  padding: 22px;
-  background: #fff;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05);
-}
-
-.gov-search-results .card-title {
-  margin: 0 0 8px;
-  color: #172033;
-  font-size: 21px;
-}
-
-.gov-search-results .muted {
-  color: #64748b;
-}
-
-.results-list {
+.sr {
   display: grid;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.result-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  border: 1px solid #e2eaf5;
-  border-radius: 8px;
-  padding: 16px;
-  background: #fbfdff;
-}
-
-.result-item > div:first-child {
-  display: grid;
-  gap: 6px;
-}
-
-.result-meta {
-  display: flex;
-  align-items: center;
   gap: 16px;
-  color: #475569;
-  font-size: 14px;
 }
 
-.result-meta .price {
-  color: #0b3d91;
-  font-weight: 800;
-  white-space: nowrap;
-}
-
-.result-meta .btn-primary {
-  border: 0;
-  border-radius: 6px;
-  padding: 9px 12px;
+/* ---------- summary ---------- */
+.sr-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px 24px;
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #0f766e 0%, #0b5f59 100%);
   color: #fff;
-  background: #0b3d91;
-  font: inherit;
-  font-size: 13px;
+}
+
+.sr-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 6px;
+  color: #ccfbf1;
+  font-size: 12px;
   font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sr-summary h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 2px;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.sr-summary p {
+  margin: 0;
+  font-size: 14px;
+  color: #d5f5f1;
+}
+
+.sr-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.result-meta .btn-primary:hover {
-  background: #0b5bd3;
+.sr-ghost:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary-dark);
 }
 
-@media (max-width: 650px) {
-  .gov-search-results {
-    width: min(100% - 20px, 1000px);
-    margin-top: 18px;
+.sr-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sr-summary .sr-ghost {
+  border-color: rgba(255, 255, 255, 0.45);
+  background: transparent;
+  color: #fff;
+}
+
+.sr-summary .sr-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+
+/* ---------- day switcher and toolbar ---------- */
+.sr-days {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.sr-days > span {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.sr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sr-toolbar p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.sr-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.sr-toolbar select {
+  padding: 7px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* ---------- trip cards ---------- */
+.sr-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sr-card {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sr-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 6px 16px rgba(16, 24, 40, 0.08);
+}
+
+.sr-card-main {
+  display: grid;
+  flex: 1;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sr-operator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sr-vehicle {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+}
+
+.sr-operator strong {
+  display: block;
+  font-size: 16px;
+}
+
+.sr-operator small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sr-times {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.sr-times > div:not(.sr-line) {
+  display: grid;
+  gap: 2px;
+}
+
+.sr-times b {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.sr-times small {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sr-line {
+  position: relative;
+  flex: 1;
+  min-width: 60px;
+  max-width: 160px;
+  height: 1px;
+  background: #cbd5e1;
+}
+
+.sr-line span {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.sr-seats {
+  justify-self: start;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sr-seats--low {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.sr-seats--out {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.sr-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-width: 150px;
+  padding-left: 20px;
+  border-left: 1px dashed var(--line);
+}
+
+.sr-from {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.sr-fare {
+  margin-bottom: 6px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.sr-fare small {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* ---------- empty and error states ---------- */
+.sr-state {
+  padding: 48px 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  text-align: center;
+}
+
+.sr-state h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.sr-state p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.sr-state--error p {
+  color: var(--danger);
+}
+
+.sr-state-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 640px) {
+  .sr-summary h2 {
+    font-size: 20px;
   }
 
-  .result-item,
-  .result-meta {
-    align-items: flex-start;
+  .sr-card {
     flex-direction: column;
   }
 
-  .result-meta {
-    gap: 10px;
+  .sr-card-side {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0 0;
+    border-top: 1px dashed var(--line);
+    border-left: none;
+  }
+
+  .sr-fare {
+    margin: 0;
+  }
+
+  .sr-from {
+    display: none;
+  }
+
+  .sr-times b {
+    font-size: 17px;
+  }
+
+  .sr-days .sr-ghost {
+    padding: 8px 10px;
   }
 }

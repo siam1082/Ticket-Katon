@@ -11,7 +11,7 @@ export default function DisclaimerBanner() {
       <div className="demo-banner-row">
         <Info size={16} aria-hidden="true" />
         <span className="demo-banner-text">
-          <strong>Academic demo.</strong> {DISCLAIMER_SHORT}
+          <strong>Academic demo</strong> · {DISCLAIMER_SHORT}
         </span>
         <button
           type="button"

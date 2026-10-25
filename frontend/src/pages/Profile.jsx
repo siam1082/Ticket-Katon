@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Bus, Train, Ship, MapPin, Calendar, Clock, Printer, ChevronDown, X, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import API from '../services/api';
+import PageLoader from '../components/PageLoader';
 import './Profile.css';
 
 const TRANSPORT = {
@@ -178,7 +179,7 @@ export default function Profile() {
   };
 
   if (!isAuthenticated) return null;
-  if (loading) return <p className="pf-state">Loading your profile...</p>;
+  if (loading) return <PageLoader label="Loading your profile…" />;
 
   return (
     <div className="pf">
